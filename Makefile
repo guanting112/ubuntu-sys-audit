@@ -11,9 +11,10 @@ build:
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/ubuntu-sys-audit-linux-arm64 .
 	cd dist && shasum -a 256 ubuntu-sys-audit-linux-* > SHA256SUMS
 
-# Unit tests need Linux, so on macOS they run inside an Ubuntu container.
+# Unit tests need Linux, so on macOS they run in a container. They run as a non
+# root user to match CI, where root only code paths are not exercised.
 test:
-	docker run --rm -v "$(CURDIR)":/src -w /src golang:1.27 go test ./...
+	docker run --rm --user 1000:1000 -e HOME=/tmp -v "$(CURDIR)":/src -w /src golang:1.27 go test -buildvcs=false ./...
 
 # Boots each Ubuntu release in Docker, plants fake indicators and checks the
 # detections. Takes several minutes.

@@ -69,24 +69,38 @@ func assertFits(t *testing.T, content string, w, h int) {
 
 var sizes = [][2]int{{minWidth, minHeight}, {60, 20}, {80, 24}, {100, 30}, {109, 30}, {110, 30}, {120, 40}, {160, 50}, {240, 70}}
 
+// Layout tests set IsRoot themselves. The warning line only exists for non root
+// users, so relying on whoever runs the tests would hide half the layouts.
 func TestResultsLayoutFitsEveryTerminalSize(t *testing.T) {
-	for _, s := range sizes {
-		m := newResultsModel(t, s[0], s[1])
-		assertFits(t, m.viewResults(), s[0], s[1])
-		for range 20 {
-			m.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	for _, root := range []bool{true, false} {
+		for _, s := range sizes {
+			m := newResultsModel(t, s[0], s[1])
+			m.host.IsRoot = root
+			assertFits(t, m.viewResults(), s[0], s[1])
+			for range 20 {
+				m.handleKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+			}
+			assertFits(t, m.viewResults(), s[0], s[1])
 		}
-		assertFits(t, m.viewResults(), s[0], s[1])
 	}
 }
 
 func TestScanLayoutFitsEveryTerminalSize(t *testing.T) {
-	for _, s := range sizes {
-		m := New(context.Background(), checks.Options{Version: "test"})
-		m.Update(tea.WindowSizeMsg{Width: s[0], Height: s[1]})
-		m.applyEvent(checks.Event{Index: 3, Done: false})
-		m.applyEvent(checks.Event{Index: 0, Done: true, Findings: []model.Finding{{Severity: model.Critical, Title: strings.Repeat("很長的嚴重警告標題", 20)}}})
-		assertFits(t, m.viewScan(), s[0], s[1])
+	var findings []model.Finding
+	for _, sev := range model.AllSeverities {
+		for range 120 {
+			findings = append(findings, model.Finding{Severity: sev, Title: strings.Repeat("A very long critical alert title ", 10)})
+		}
+	}
+	for _, root := range []bool{true, false} {
+		for _, s := range sizes {
+			m := New(context.Background(), checks.Options{Version: "test"})
+			m.host.IsRoot = root
+			m.Update(tea.WindowSizeMsg{Width: s[0], Height: s[1]})
+			m.applyEvent(checks.Event{Index: 3, Done: false})
+			m.applyEvent(checks.Event{Index: 0, Done: true, Findings: findings})
+			assertFits(t, m.viewScan(), s[0], s[1])
+		}
 	}
 }
 

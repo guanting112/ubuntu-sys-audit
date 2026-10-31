@@ -8,11 +8,9 @@ Ubuntu 18.04、20.04、22.04、24.04、26.04 的唯讀安全檢測工具。單�
 
 ## 使用方式
 
-把 `OWNER` 換成你的 GitHub 帳號或組織。
-
 ```sh
-curl -fsSLO https://github.com/OWNER/ubuntu-sys-audit/releases/latest/download/ubuntu-sys-audit-linux-amd64
-curl -fsSLO https://github.com/OWNER/ubuntu-sys-audit/releases/latest/download/SHA256SUMS
+curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/ubuntu-sys-audit-linux-amd64
+curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/SHA256SUMS
 sha256sum --ignore-missing -c SHA256SUMS
 chmod +x ubuntu-sys-audit-linux-amd64
 sudo ./ubuntu-sys-audit-linux-amd64

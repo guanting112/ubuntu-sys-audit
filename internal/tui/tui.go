@@ -584,7 +584,7 @@ func (m *Model) viewScan() string {
 	var b strings.Builder
 	b.WriteString(m.viewHeaderLine() + "\n")
 	if !m.host.IsRoot {
-		b.WriteString(st.warn.Render("Not running as root, so some items will be marked not checked. Use sudo.") + "\n")
+		b.WriteString(st.warn.Render(ansi.Truncate("Not running as root, so some items will be marked not checked. Use sudo.", m.width, "…")) + "\n")
 	}
 	b.WriteString("\n")
 	total := len(m.rows)
@@ -623,10 +623,11 @@ func (m *Model) viewScan() string {
 			b.WriteString(m.renderRow(i, m.width-1) + "\n")
 		}
 	}
-	b.WriteString("\n" + m.renderLiveCounts())
+	status := m.renderLiveCounts()
 	if n := len(m.alerts); n > 0 {
-		b.WriteString("  " + st.sevStyle(model.Critical).Render(ansi.Truncate("Latest: "+m.alerts[n-1], max(m.width-44, 10), "…")))
+		status += "  " + st.sevStyle(model.Critical).Render("Latest: "+m.alerts[n-1])
 	}
+	b.WriteString("\n" + ansi.Truncate(status, m.width, "…"))
 	b.WriteString("\n" + st.key.Render("q") + st.keyHelp.Render(" abort scan"))
 	return b.String()
 }
