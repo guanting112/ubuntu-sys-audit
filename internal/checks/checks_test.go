@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"unicode"
@@ -324,6 +325,57 @@ func TestWebshellRules(t *testing.T) {
 	for _, src := range benign {
 		if _, name := matchWebshell([]byte(src)); name != "" {
 			t.Errorf("false positive on %q: %s", src, name)
+		}
+	}
+}
+
+func TestIsPackagedAlias(t *testing.T) {
+	links := map[string]string{
+		"/lib/systemd/systemd-udevd": "/usr/bin/udevadm",
+		"/usr/sbin/auditd":           "/usr/bin/dash",
+		"/sbin/mingetty":             "/usr/bin/unrelated",
+	}
+	resolve := func(p string) (string, error) {
+		if real, ok := links[p]; ok {
+			return real, nil
+		}
+		return "", os.ErrNotExist
+	}
+	packaged := map[string]bool{
+		"/lib/systemd/systemd-udevd": true, "/usr/bin/udevadm": true, "/usr/bin/dash": true,
+		"/sbin/mingetty": true, "/usr/bin/unrelated": true, "/sbin/udevd": true,
+	}
+	owned := func(p string) bool { return packaged[p] }
+	cases := []struct {
+		name, argv0, exe string
+		want             bool
+	}{
+		{"udev multi-call binary", "/lib/systemd/systemd-udevd", "/usr/bin/udevadm", true},
+		{"usrmerge spelling of the same binary", "/lib/systemd/systemd-udevd", "/bin/../usr/bin/udevadm", false},
+		{"symlink created by an attacker", "/usr/sbin/auditd", "/usr/bin/dash", false},
+		{"packaged name pointing at another binary", "/sbin/mingetty", "/usr/bin/dash", false},
+		{"BPFDoor style name with no such file", "/sbin/udevd", "/dev/shm/.udevd", false},
+		{"unpackaged binary behind a packaged name", "/lib/systemd/systemd-udevd", "/dev/shm/.udevd", false},
+		{"relative name", "systemd-udevd", "/usr/bin/udevadm", false},
+	}
+	for _, c := range cases {
+		if got := isPackagedAlias(c.argv0, c.exe, resolve, owned); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestPathIsProcessExe(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pathIsProcessExe(os.Getpid(), self) {
+		t.Errorf("%s should match this process", self)
+	}
+	for _, path := range []string{"/proc/self/status", "/no/such/file", "relative/path"} {
+		if pathIsProcessExe(os.Getpid(), path) {
+			t.Errorf("%s should not match this process", path)
 		}
 	}
 }

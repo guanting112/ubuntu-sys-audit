@@ -35,6 +35,11 @@ for release in "$@"; do
 	# applies the same rules it uses on a real host.
 	docker exec "$name" sh -c 'rm -f /.dockerenv /run/.containerenv /run/systemd/container'
 
+	# Real hosts run udevd, whose argv[0] differs from its binary from 22.04 on.
+	# Containers do not start it, which once hid a false positive on every host.
+	docker exec "$name" sh -c 'pgrep -x systemd-udevd >/dev/null || /lib/systemd/systemd-udevd --daemon >/dev/null 2>&1; sleep 1; pgrep -x systemd-udevd >/dev/null' \
+		|| { echo "  FAIL udevd is not running, so the clean scan would not test it"; status=1; }
+
 	docker exec "$name" sh -c '/opt/e2e/audit --json >/root/clean.json 2>/dev/null; python3 /opt/e2e/assert.py clean /root/clean.json' || status=1
 
 	docker exec "$name" sh /opt/e2e/plant.sh >/dev/null 2>&1

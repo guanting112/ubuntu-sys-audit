@@ -11,6 +11,10 @@ if [ ! -f /etc/ubuntu-sys-audit-e2e ]; then
 	exit 1
 fi
 
+# --- not an indicator: replace udevadm the way dpkg does during an upgrade, so
+# the running udevd now shows a deleted binary. This must not read as masquerade.
+cp -p /usr/bin/udevadm /usr/bin/udevadm.new && mv /usr/bin/udevadm.new /usr/bin/udevadm
+
 # --- accounts
 echo 'backdoor:x:0:0::/root:/bin/bash' >>/etc/passwd
 echo 'backdoor:$6$saltsalt$AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH:20000:0:99999:7:::' >>/etc/shadow
@@ -77,6 +81,10 @@ EOF
 chmod +x /usr/local/php8/bin/php
 
 # --- processes
+# A symlink made by an attacker gives argv[0] a path that resolves to the running
+# binary. Unlike udevd's, this one belongs to no package and must still be caught.
+ln -s /usr/bin/dash /usr/sbin/auditd
+bash -c 'exec -a /usr/sbin/auditd /usr/bin/dash -c "sleep 86400; :"' >/dev/null 2>&1 &
 cp /opt/e2e/fakeimplant /dev/shm/.udevd
 chmod +x /dev/shm/.udevd
 bash -c 'exec -a "/sbin/udevd -d" /dev/shm/.udevd self-delete' >/dev/null 2>&1 &

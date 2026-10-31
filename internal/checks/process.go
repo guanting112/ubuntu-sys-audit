@@ -3,6 +3,7 @@ package checks
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"ubuntu-sys-audit/internal/dpkg"
 	"ubuntu-sys-audit/internal/fsx"
 	"ubuntu-sys-audit/internal/model"
 	"ubuntu-sys-audit/internal/procinfo"
@@ -68,6 +70,53 @@ func argv0Base(p *procinfo.Process) string {
 	return strings.TrimLeft(first[strings.LastIndexByte(first, '/')+1:], "-@")
 }
 
+// argv0IsAlias reports whether argv[0] legitimately names the running binary by
+// another path. Multi-call binaries do this: from 22.04 on,
+// /lib/systemd/systemd-udevd is a symlink to /usr/bin/udevadm, so every host
+// running udev would otherwise look like it hosts a masquerading process.
+func argv0IsAlias(c *Context, p *procinfo.Process) bool {
+	if len(p.Cmdline) == 0 {
+		return false
+	}
+	argv0 := strings.Fields(p.Cmdline[0] + " x")[0]
+	if p.InContainer {
+		// The host's dpkg database says nothing about a container's files, so
+		// all that can be checked is that the path is the running binary.
+		return pathIsProcessExe(p.PID, argv0)
+	}
+	return isPackagedAlias(argv0, p.Exe, filepath.EvalSymlinks, c.Owned)
+}
+
+// isPackagedAlias requires both paths to come from packages. A process name is
+// attacker controlled, and so is a symlink an attacker creates, but neither can
+// add an entry to the package file lists without also tampering with dpkg.
+//
+// Paths are compared as strings rather than by inode so this still holds after
+// a package upgrade, when the process runs a binary replaced on disk. That case
+// is reported separately as a stale binary.
+func isPackagedAlias(argv0, exe string, resolve func(string) (string, error), owned func(string) bool) bool {
+	if !filepath.IsAbs(argv0) || !owned(argv0) || !owned(exe) {
+		return false
+	}
+	real, err := resolve(argv0)
+	return err == nil && dpkg.NormalizePath(real) == dpkg.NormalizePath(exe)
+}
+
+// pathIsProcessExe reports whether a path inside the process's own root is the
+// file it is running.
+func pathIsProcessExe(pid int, path string) bool {
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	dir := "/proc/" + strconv.Itoa(pid)
+	named, err := os.Stat(dir + "/root" + path)
+	if err != nil {
+		return false
+	}
+	running, err := os.Stat(dir + "/exe")
+	return err == nil && os.SameFile(named, running)
+}
+
 func checkProcesses(c *Context) []model.Finding {
 	const cat = model.CatProcess
 	procs, err := c.Procs()
@@ -106,7 +155,7 @@ func checkProcesses(c *Context) []model.Finding {
 			}
 		}
 		if p.Exe != "" {
-			if argv := argv0Base(p); masqueradeNames[argv] && !strings.HasPrefix(exeBase, argv) && !strings.HasPrefix(argv, exeBase) {
+			if argv := argv0Base(p); masqueradeNames[argv] && !strings.HasPrefix(exeBase, argv) && !strings.HasPrefix(argv, exeBase) && !argv0IsAlias(c, p) {
 				masquerade = append(masquerade, line)
 			}
 		}

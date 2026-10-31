@@ -76,6 +76,16 @@ def check_planted(report, raw):
         failures.append("raw terminal escape in report")
     if "NOPASSWD:ALL" not in raw:
         failures.append("redaction mangled sudoers evidence")
+    masquerade = " ".join(
+        line
+        for finding in report["findings"]
+        if finding["id"] == "process.masquerade"
+        for line in finding.get("evidence", [])
+    )
+    if "/usr/sbin/auditd" not in masquerade:
+        failures.append("attacker made symlink was accepted as a legitimate alias")
+    if "systemd-udevd" in masquerade:
+        failures.append("udevd reported as masquerading after a package upgrade")
     return failures
 
 
