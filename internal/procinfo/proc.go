@@ -38,11 +38,11 @@ func (p *Process) Label() string {
 	if p.Exe != "" {
 		s += " exe=" + p.Exe
 		if p.ExeDeleted {
-			s += " (已刪除)"
+			s += " (deleted)"
 		}
 	}
 	if p.InContainer {
-		s += " [容器]"
+		s += " [container]"
 	}
 	return s
 }

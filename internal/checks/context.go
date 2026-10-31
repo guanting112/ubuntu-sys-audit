@@ -370,7 +370,7 @@ func skipped(id string, cat model.Category, title, reason string) model.Finding 
 }
 
 func needRoot(id string, cat model.Category, title string) model.Finding {
-	return skipped(id, cat, title, "需要 root 權限，請用 sudo 執行。")
+	return skipped(id, cat, title, "Requires root. Run with sudo.")
 }
 
 // inDirs reports whether path is inside one of the directories.

@@ -36,6 +36,17 @@ func loadFeed(c *Context) (*oval.Feed, error) {
 	return feed, err
 }
 
+// plural formats a count with its noun, such as "1 CVE" or "2 advisories".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	if stem, ok := strings.CutSuffix(noun, "y"); ok {
+		return fmt.Sprintf("%d %sies", n, stem)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
 func priorityRank(p string) model.Severity {
 	switch strings.ToLower(p) {
 	case "critical":
@@ -134,7 +145,7 @@ func describeHit(h oval.Hit) string {
 		})
 		for i, cve := range sorted {
 			if i == 6 {
-				ids = append(ids, fmt.Sprintf("…等 %d 個", len(sorted)))
+				ids = append(ids, fmt.Sprintf("…%d total", len(sorted)))
 				break
 			}
 			ids = append(ids, cve.ID)
@@ -146,35 +157,35 @@ func describeHit(h oval.Hit) string {
 
 func checkCVE(c *Context) []model.Finding {
 	const cat = model.CatCVE
-	title := "CVE 比對（Ubuntu USN）"
+	title := "CVE check (Ubuntu USN)"
 	if _, known := releases[c.Host.Codename]; !known && c.Opts.OVALFile == "" {
-		return []model.Finding{skipped("cve.usn", cat, title, "沒有這個發行版（"+c.Host.Codename+"）的 OVAL 資料。")}
+		return []model.Finding{skipped("cve.usn", cat, title, "No OVAL data for this release ("+c.Host.Codename+").")}
 	}
 	if c.Opts.Offline && c.Opts.OVALFile == "" {
-		f := skipped("cve.usn", cat, title, "離線模式且沒有指定 --oval-file，所以沒有比對 CVE。")
-		f.Remediation = "在有網路的機器下載 " + oval.FeedURL(c.Host.Codename) + "，再用 --oval-file 指定。"
+		f := skipped("cve.usn", cat, title, "Offline mode without --oval-file, so CVEs were not checked.")
+		f.Remediation = "On a machine with internet access, download " + oval.FeedURL(c.Host.Codename) + " and pass it with --oval-file."
 		return []model.Finding{f}
 	}
 	if _, err := c.Packages(); err != nil {
-		return []model.Finding{skipped("cve.usn", cat, title, "無法讀取 dpkg 資料庫："+err.Error())}
+		return []model.Finding{skipped("cve.usn", cat, title, "Cannot read the dpkg database: "+err.Error())}
 	}
 	feed, err := loadFeed(c)
 	if err != nil {
-		f := skipped("cve.usn", cat, title, "無法取得 OVAL 資料："+err.Error())
-		f.Remediation = "確認主機可連線 security-metadata.canonical.com、使用 --proxy，或下載後用 --oval-file 指定。"
+		f := skipped("cve.usn", cat, title, "Cannot get OVAL data: "+err.Error())
+		f.Remediation = "Confirm the host can reach security-metadata.canonical.com, use --proxy, or download the file and pass it with --oval-file."
 		return []model.Finding{f}
 	}
 	var out []model.Finding
 	if ts, err := time.Parse("2006-01-02T15:04:05", feed.Timestamp); err == nil && time.Since(ts) > 14*24*time.Hour {
-		f := finding("cve.feed_stale", cat, model.Medium, fmt.Sprintf("OVAL 資料已是 %d 天前的版本", int(time.Since(ts).Hours()/24)))
-		f.Detail = "資料日期是 " + feed.Timestamp + "，之後公告的漏洞不在比對範圍內。"
-		f.Remediation = "下載最新的 OVAL 檔案。"
+		f := finding("cve.feed_stale", cat, model.Medium, fmt.Sprintf("OVAL data is %d days old", int(time.Since(ts).Hours()/24)))
+		f.Detail = "The data is dated " + feed.Timestamp + ", so vulnerabilities announced later are not covered."
+		f.Remediation = "Download the latest OVAL file."
 		out = append(out, f)
 	}
 	hits := feed.Evaluate(c.PackageVersions(), c.Host.Kernel)
 	if len(hits) == 0 {
-		f := finding("cve.usn", cat, model.OK, fmt.Sprintf("已比對 %d 則 USN，沒有未套用的修補", feed.DefinitionCount()))
-		f.Detail = "資料日期 " + feed.Timestamp + "。USN 只涵蓋 Ubuntu 已發布修補的漏洞與 apt 安裝的套件；自行編譯或第三方來源請看 Web 類別。"
+		f := finding("cve.usn", cat, model.OK, fmt.Sprintf("Checked %d USNs, no fixes missing", feed.DefinitionCount()))
+		f.Detail = "Data dated " + feed.Timestamp + ". USNs cover only vulnerabilities Ubuntu has fixed and packages installed with apt. For self-compiled or third-party software, see the Web category."
 		return append(out, f)
 	}
 
@@ -188,17 +199,17 @@ func checkCVE(c *Context) []model.Finding {
 		}
 	}
 	overview := finding("cve.overview", cat, model.Info,
-		fmt.Sprintf("%d 個套件有未套用的修補：%d 則 USN、%d 個 CVE", len(groups), len(hits), len(allCVEs)))
-	overview.Detail = fmt.Sprintf("OVAL 資料日期 %s，共比對 %d 則 USN。嚴重度取該套件所有 USN 與 CVE 的最高值。", feed.Timestamp, feed.DefinitionCount())
+		fmt.Sprintf("Packages with missing fixes: %d (%d USNs, %d CVEs)", len(groups), len(hits), len(allCVEs)))
+	overview.Detail = fmt.Sprintf("OVAL data dated %s, %d USNs checked. Severity is the highest of all USNs and CVEs for the package.", feed.Timestamp, feed.DefinitionCount())
 	overview.Evidence = []string{
-		fmt.Sprintf("嚴重 %d 個套件，高 %d 個，中 %d 個，資訊 %d 個", counts[model.Critical], counts[model.High], counts[model.Medium], counts[model.Info]),
+		fmt.Sprintf("Packages by severity: critical %d, high %d, medium %d, info %d", counts[model.Critical], counts[model.High], counts[model.Medium], counts[model.Info]),
 	}
 	overview.Focus = true
 	out = append(out, overview)
 
 	pro := esmEnabled()
 	for _, g := range groups {
-		f := finding("cve.pkg."+g.source, cat, g.worst, fmt.Sprintf("%s：%d 則安全公告未修補，涉及 %d 個 CVE", g.source, len(g.hits), len(g.cves)))
+		f := finding("cve.pkg."+g.source, cat, g.worst, fmt.Sprintf("%s: %s missing, %s", g.source, plural(len(g.hits), "security notice"), plural(len(g.cves), "CVE")))
 		f.Focus = focusSources.MatchString(g.source)
 
 		var names []string
@@ -208,7 +219,7 @@ func checkCVE(c *Context) []model.Finding {
 		sort.Strings(names)
 		for _, name := range names {
 			p := g.binaries[name]
-			f.Evidence = append(f.Evidence, fmt.Sprintf("%s  已安裝 %s，修補版本 %s", p.Binary, p.Installed, p.Fixed))
+			f.Evidence = append(f.Evidence, fmt.Sprintf("%s  installed %s, fixed in %s", p.Binary, p.Installed, p.Fixed))
 		}
 		for _, h := range g.hits {
 			f.Evidence = append(f.Evidence, describeHit(h))
@@ -218,17 +229,17 @@ func checkCVE(c *Context) []model.Finding {
 		}
 		switch {
 		case g.kernel:
-			f.Detail = "比對的是執行中的 kernel。就算已經安裝新 kernel，重開機之前仍然受影響。"
-			f.Remediation = "sudo apt update && sudo apt full-upgrade，然後重新開機。"
+			f.Detail = "This compares the running kernel. Even with a newer kernel installed, the host stays affected until it reboots."
+			f.Remediation = "sudo apt update && sudo apt full-upgrade, then reboot."
 		case g.proOnly && !pro:
-			f.Detail = "修補只透過 Ubuntu Pro（ESM）提供，這台主機尚未啟用。"
-			f.Remediation = "sudo pro attach <token>，再執行 sudo pro fix " + g.hits[0].USN
+			f.Detail = "The fix is available only through Ubuntu Pro (ESM), which this host has not enabled."
+			f.Remediation = "sudo pro attach <token>, then sudo pro fix " + g.hits[0].USN
 		default:
 			f.Remediation = "sudo apt update && sudo apt install --only-upgrade " + strings.Join(names, " ")
 			if !pro {
 				for _, name := range names {
 					if g.binaries[name].RequiresPro() {
-						f.Detail = "apt 能修補其中一部分，較新的修補只透過 Ubuntu Pro（ESM）提供，這台主機尚未啟用。"
+						f.Detail = "apt can apply some of these. Newer fixes are available only through Ubuntu Pro (ESM), which this host has not enabled."
 						break
 					}
 				}

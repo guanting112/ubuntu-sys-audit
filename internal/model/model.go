@@ -25,14 +25,14 @@ const (
 )
 
 var severityKeys = []string{"critical", "high", "medium", "info", "ok", "skipped"}
-var severityLabels = []string{"嚴重", "高", "中", "資訊", "通過", "未檢查"}
+var severityLabels = []string{"Critical", "High", "Medium", "Info", "Passed", "Not checked"}
 
 // AllSeverities lists severities in display order.
 var AllSeverities = []Severity{Critical, High, Medium, Info, OK, Skipped}
 
 func (s Severity) String() string { return severityKeys[s] }
 
-// Label returns the Traditional Chinese display name.
+// Label returns the display name.
 func (s Severity) Label() string { return severityLabels[s] }
 
 func (s Severity) MarshalJSON() ([]byte, error) { return json.Marshal(s.String()) }
@@ -61,20 +61,20 @@ var Categories = []Category{
 }
 
 var categoryLabels = map[Category]string{
-	CatSystem:      "系統",
-	CatAccounts:    "帳號",
+	CatSystem:      "System",
+	CatAccounts:    "Accounts",
 	CatSSH:         "SSH",
-	CatNetwork:     "網路",
-	CatProcess:     "程序",
-	CatIntegrity:   "完整性",
-	CatPersistence: "持久化",
-	CatFilesystem:  "檔案",
-	CatPackages:    "套件",
+	CatNetwork:     "Network",
+	CatProcess:     "Processes",
+	CatIntegrity:   "Integrity",
+	CatPersistence: "Persistence",
+	CatFilesystem:  "Filesystem",
+	CatPackages:    "Packages",
 	CatCVE:         "CVE",
 	CatWeb:         "Web",
 }
 
-// Label returns the Traditional Chinese display name.
+// Label returns the display name.
 func (c Category) Label() string {
 	if l, ok := categoryLabels[c]; ok {
 		return l

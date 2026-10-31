@@ -124,13 +124,13 @@ type walkResult struct {
 func checkFilesystem(c *Context) []model.Finding {
 	const cat = model.CatFilesystem
 	if c.Opts.SkipFS {
-		return []model.Finding{skipped("filesystem.walk", cat, "檔案系統掃描", "已用 --skip-fs 略過。")}
+		return []model.Finding{skipped("filesystem.walk", cat, "Filesystem scan", "Skipped by --skip-fs.")}
 	}
 	if !c.Host.IsRoot {
-		return []model.Finding{needRoot("filesystem.walk", cat, "檔案系統掃描")}
+		return []model.Finding{needRoot("filesystem.walk", cat, "Filesystem scan")}
 	}
 	if _, err := c.Owners(); err != nil {
-		return []model.Finding{skipped("filesystem.walk", cat, "檔案系統掃描", "無法讀取 dpkg 資料庫，不能判斷檔案來源："+err.Error())}
+		return []model.Finding{skipped("filesystem.walk", cat, "Filesystem scan", "Cannot read the dpkg database, so file origins are unknown: "+err.Error())}
 	}
 	budget := c.Opts.FSTimeout
 	if budget <= 0 {
@@ -187,9 +187,9 @@ func inspectFile(c *Context, path string, info os.FileInfo, r *walkResult) {
 		owned := c.Owned(path)
 		switch {
 		case dangerousSUID[strings.TrimRight(name, "0123456789.")]:
-			r.suidCritical = append(r.suidCritical, line+"（這支程式不該有 SUID，可直接提權）")
+			r.suidCritical = append(r.suidCritical, line+" (this program should not be SUID, it allows direct privilege escalation)")
 		case !owned && (inTemp(path) || inDirs(path, "/home", "/root", "/var", "/dev")):
-			r.suidCritical = append(r.suidCritical, line+"（位於使用者可寫的位置）")
+			r.suidCritical = append(r.suidCritical, line+" (in a user-writable location)")
 		case !owned:
 			r.suidHigh = append(r.suidHigh, line)
 		default:
@@ -254,23 +254,23 @@ func filesystemFindings(r *walkResult) []model.Finding {
 		f.Detail, f.Remediation, f.Evidence = detail, fix, ev
 		out = append(out, f)
 	}
-	add("suid_critical", model.Critical, "%d 個危險的 SUID／SGID 檔案", "這些檔案能讓任何本機使用者直接變成 root，是常見的提權後門。", "先記錄檔案資訊與修改時間，再 chmod u-s,g-s 移除。", r.suidCritical)
-	add("suid_unowned", model.High, "%d 個 SUID／SGID 檔案不屬於任何套件", "自行安裝的軟體偶爾會這樣，但應逐一確認。", "不需要就 chmod u-s,g-s 移除。", r.suidHigh)
-	add("cap_danger", model.High, "%d 個檔案帶有危險的 Capabilities", "cap_setuid 這類權限和 SUID 一樣能提權，而且一般的 SUID 掃描看不到。", "確認用途，不需要就 setcap -r 移除。", r.capDanger)
-	add("cap_unowned", model.Medium, "%d 個非套件檔案帶有 Capabilities", "", "", r.capInfo)
-	add("temp_elf", model.High, "暫存目錄內有 %d 個 ELF 執行檔", "編譯或安裝過程可能留下這類檔案，它也是攻擊工具最常見的落腳處。", "確認來源後移除。先保留樣本再刪除。", r.tempELF)
-	add("temp_script", model.Medium, "暫存目錄內有 %d 個可執行腳本", "", "確認來源。", r.tempScript)
-	add("temp_hidden", model.Medium, "暫存目錄內有 %d 個隱藏目錄", "攻擊者常用 .x 或 ... 這類名稱藏工具。", "檢查內容。", r.tempHidden)
-	add("dev_regular", model.High, "/dev 內有 %d 個一般檔案", "/dev 應該只有裝置檔。把檔案藏在這裡是老牌 rootkit 的手法。", "檢查內容。", r.regularInDev)
-	add("world_writable", model.High, "系統目錄內有 %d 個任何人都可寫入的項目", "任何本機使用者都能修改它們，可用來提權。", "chmod o-w。", r.worldWritable)
-	add("unmanaged_bin", model.Medium, "系統 bin 目錄有 %d 個非套件管理的執行檔", "手動安裝的工具會列在這裡，攻擊者投放的也會。這些檔案不會收到 apt 更新。", "確認來源。", r.unmanagedBin)
+	add("suid_critical", model.Critical, "Dangerous SUID/SGID files (%d)", "These files let any local user become root directly, a common privilege escalation backdoor.", "Record the file details and modification time, then remove the bit with chmod u-s,g-s.", r.suidCritical)
+	add("suid_unowned", model.High, "SUID/SGID files that belong to no package (%d)", "Manually installed software occasionally does this, but check each one.", "If not needed, remove the bit with chmod u-s,g-s.", r.suidHigh)
+	add("cap_danger", model.High, "Files with dangerous capabilities (%d)", "Capabilities such as cap_setuid allow privilege escalation just like SUID, and ordinary SUID scans miss them.", "Confirm the purpose. If not needed, remove them with setcap -r.", r.capDanger)
+	add("cap_unowned", model.Medium, "Unpackaged files with capabilities (%d)", "", "", r.capInfo)
+	add("temp_elf", model.High, "ELF binaries in temp directories (%d)", "Builds and installers can leave these behind, but temp directories are also where attack tools most often land.", "Check the source, keep a sample, then remove them.", r.tempELF)
+	add("temp_script", model.Medium, "Executable scripts in temp directories (%d)", "", "Check the source.", r.tempScript)
+	add("temp_hidden", model.Medium, "Hidden directories in temp directories (%d)", "Attackers often use names such as .x or ... to hide tools.", "Inspect the contents.", r.tempHidden)
+	add("dev_regular", model.High, "Regular files in /dev (%d)", "/dev should hold only device files. Hiding files here is an old rootkit technique.", "Inspect the contents.", r.regularInDev)
+	add("world_writable", model.High, "World-writable items in system directories (%d)", "Any local user can modify them, which allows privilege escalation.", "Remove the write bit with chmod o-w.", r.worldWritable)
+	add("unmanaged_bin", model.Medium, "Unpackaged binaries in system bin directories (%d)", "Manually installed tools appear here, and so do binaries dropped by attackers. These files get no apt updates.", "Check the source.", r.unmanagedBin)
 	if len(r.suidCritical)+len(r.suidHigh) == 0 {
-		out = append(out, finding("filesystem.suid_ok", cat, model.OK, fmt.Sprintf("%d 個 SUID／SGID 檔案都來自套件", r.suidOwned)))
+		out = append(out, finding("filesystem.suid_ok", cat, model.OK, fmt.Sprintf("All %d SUID/SGID files come from packages", r.suidOwned)))
 	}
 	if r.incomplete {
-		out = append(out, skipped("filesystem.partial", cat, "檔案系統掃描未完成", fmt.Sprintf("達到時間上限，只掃描了 %d 個檔案，以上結果不完整。可用 --fs-timeout 調整。", r.files)))
+		out = append(out, skipped("filesystem.partial", cat, "Filesystem scan did not finish", fmt.Sprintf("Hit the time limit after %d files, so these results are incomplete. Adjust with --fs-timeout.", r.files)))
 	} else {
-		out = append(out, finding("filesystem.stats", cat, model.Info, fmt.Sprintf("已掃描 %d 個檔案", r.files)))
+		out = append(out, finding("filesystem.stats", cat, model.Info, fmt.Sprintf("Scanned %d files", r.files)))
 	}
 	return out
 }

@@ -1,12 +1,12 @@
 # ubuntu-sys-audit
 
-[English](README.en.md) | 繁體中文
+English | [繁體中文](README.zh-TW.md)
 
-Ubuntu 18.04、20.04、22.04、24.04、26.04 的唯讀安全檢測工具。單一靜態執行檔，下載後用 sudo 直接跑，目標主機不需要編譯器或任何套件。
+A read-only security audit tool for Ubuntu 18.04, 20.04, 22.04, 24.04 and 26.04. It ships as a single static binary: download it and run it with sudo. The target host needs no compiler and no extra packages.
 
-## 使用方式
+## Usage
 
-把 `OWNER` 換成你的 GitHub 帳號或組織。
+Replace `OWNER` with your GitHub user or organization.
 
 ```sh
 curl -fsSLO https://github.com/OWNER/ubuntu-sys-audit/releases/latest/download/ubuntu-sys-audit-linux-amd64
@@ -16,11 +16,11 @@ chmod +x ubuntu-sys-audit-linux-amd64
 sudo ./ubuntu-sys-audit-linux-amd64
 ```
 
-ARM 主機請把 `amd64` 換成 `arm64`。
+On ARM hosts, replace `amd64` with `arm64`.
 
-### 批次掃描多台主機
+### Scanning multiple hosts
 
-沒有 TTY 時會自動輸出 JSON，所以可以直接透過 SSH 收集：
+The tool writes JSON automatically when there is no TTY, so you can collect reports over SSH:
 
 ```sh
 for h in web-01 web-02 db-01; do
@@ -29,86 +29,87 @@ for h in web-01 web-02 db-01; do
 done
 ```
 
-上面的寫法需要主機上的 sudo 免密碼。如果 sudo 要輸入密碼，就要配置 TTY，並把報告存成檔案再取回，因為 TTY 會把 stdout 和密碼提示混在一起：
+This requires passwordless sudo on the host. If sudo asks for a password, allocate a TTY and save the report to a file, then fetch it. A TTY would otherwise mix the password prompt into stdout:
 
 ```sh
 ssh -t "$h" 'sudo ./ubuntu-sys-audit-linux-amd64 --json -o audit.json > /dev/null'
 scp "$h:audit.json" "audit-$h.json"
 ```
 
-報告權限是 0600，擁有者會設回執行 sudo 的使用者，所以 scp 可以直接取回。
+The report has mode 0600 and its owner is set back to the user who ran sudo, so scp can fetch it directly.
 
-結束代碼可以直接用來判斷：
+Use the exit code to decide what to do next:
 
-| 代碼 | 意義 |
+| Code | Meaning |
 | --- | --- |
-| 0 | 沒有待處理項目 |
-| 1 | 有中等級項目 |
-| 2 | 有嚴重或高等級項目 |
-| 130 | 掃描被中止 |
+| 0 | Nothing to act on |
+| 1 | Medium findings |
+| 2 | Critical or high findings |
+| 130 | Scan was aborted |
 
-### 選項
+### Options
 
-| 選項 | 說明 |
+| Option | Description |
 | --- | --- |
-| `--json` | 輸出 JSON 到 stdout，不開 TUI |
-| `--text` | 輸出純文字到 stdout，不開 TUI |
-| `--min-severity LV` | 純文字模式只列出此等級以上（預設 `medium`） |
-| `-o, --output FILE` | 另外把 JSON 報告存到 FILE（權限 0600） |
-| `--offline` | 不連網。沒有指定 `--oval-file` 時，不比對 CVE |
-| `--oval-file PATH` | 使用本機的 OVAL 檔（`.xml` 或 `.xml.bz2`） |
-| `--proxy URL` | 下載公告資料時使用的 HTTP proxy |
-| `--skip-fs` | 略過全機檔案掃描 |
-| `--fs-timeout TIME` | 全機檔案掃描的時間上限（預設 `5m`） |
-| `--no-netlink` | 不讀取 BPF 過濾器，避免 kernel 載入 `packet_diag` |
+| `--json` | Write JSON to stdout without opening the TUI |
+| `--text` | Write plain text to stdout without opening the TUI |
+| `--min-severity LV` | In text mode, list only this level and above: `critical`, `high`, `medium`, `info`, `ok`, `skipped` (default `medium`) |
+| `-o, --output FILE` | Also save the JSON report to FILE (mode 0600) |
+| `--offline` | Do not use the network. CVEs are not checked unless `--oval-file` is given |
+| `--oval-file PATH` | Use a local OVAL file (`.xml` or `.xml.bz2`) |
+| `--proxy URL` | HTTP proxy for downloading advisory data |
+| `--skip-fs` | Skip the full filesystem scan |
+| `--fs-timeout TIME` | Time limit for the full filesystem scan (default `5m`) |
+| `--no-netlink` | Do not read BPF filters, which keeps the kernel from loading `packet_diag` |
+| `--version` | Show the version |
 
-### TUI 按鍵
+### TUI keys
 
-`↑↓` 或 `jk` 移動 · `tab` 切換窗格 · `f` 篩選嚴重度 · `/` 搜尋 · `s` 存 JSON 到目前目錄 · `q` 離開
+`↑↓` or `jk` move · `tab` switch pane · `f` filter by severity · `/` search · `s` save JSON to the current directory · `q` quit
 
-## 檢查項目
+## What it checks
 
-| 類別 | 內容 |
+| Category | Coverage |
 | --- | --- |
-| CVE | 已安裝套件與執行中 kernel 比對 Ubuntu USN，包含只有 ESM 才有的修補 |
-| Web | nginx、PHP 的版本與來源；非 Ubuntu 套件比對 nginx.org 與 php.net；常見危險設定；webshell 特徵；上傳目錄內的 PHP |
-| 網路 | 53 Port 監聽與擁有者、連到非系統 DNS 的流量、所有監聽 Port、Packet 與 Raw socket、BPFDoor 特徵值、混雜模式、Docker |
-| 程序 | 偽裝成 kernel thread 或系統服務、從暫存目錄或記憶體執行、reverse shell、Web 服務底下的 shell、挖礦程式、LD_PRELOAD、隱藏程序、已被更新但仍在使用的函式庫 |
-| 完整性 | 系統執行檔與 dpkg 雜湊比對、`ld.so.preload`、隱藏的 kernel 模組、未簽章模組、PAM 模組與設定、`core_pattern`、`modprobe` 路徑 |
-| 持久化 | cron、at、rc.local、init.d、profile、motd、apt hook、udev、systemd 服務、家目錄登入腳本 |
-| 帳號 | 帳號數量與清單、UID 0 帳號、空白密碼、sudo 規則、高權限群組、登入紀錄、SSH 暴力嘗試 |
-| SSH | `sshd_config` 有效設定、授權金鑰清單與指紋、系統帳號的金鑰、host key 權限 |
-| 檔案 | SUID／SGID、Capabilities、暫存目錄的執行檔、`/dev` 內的一般檔案、任何人可寫的系統檔、非套件管理的系統執行檔 |
-| 套件 | 待安裝的安全更新、apt 清單是否過舊、自動更新、apt hold、第三方來源、重要軟體版本 |
-| 系統 | 版本支援期限與 ESM、kernel 版本、是否需要重開機、kernel 安全參數、CPU 漏洞緩解 |
+| CVE | Installed packages and the running kernel against Ubuntu Security Notices (USN), including fixes available only through ESM |
+| Web | nginx and PHP versions and origin; non-Ubuntu builds against nginx.org and php.net; common dangerous settings; webshell signatures; PHP files in upload directories |
+| Network | Port 53 listeners and their owners, traffic to DNS servers the system is not configured to use, all listening ports, packet and raw sockets, BPFDoor magic values, promiscuous mode, Docker |
+| Processes | Processes posing as kernel threads or system services, execution from temporary directories or memory, reverse shells, shells under web services, crypto miners, LD_PRELOAD, hidden processes, libraries replaced on disk but still in use |
+| Integrity | System binaries against dpkg hashes, `ld.so.preload`, hidden kernel modules, unsigned modules, PAM modules and configuration, `core_pattern`, the `modprobe` path |
+| Persistence | cron, at, rc.local, init.d, profile, motd, apt hooks, udev, systemd services, login scripts in home directories |
+| Accounts | Account count and list, UID 0 accounts, empty passwords, sudo rules, privileged groups, login history, SSH brute force attempts |
+| SSH | Effective `sshd_config` settings, authorized keys with fingerprints, keys on system accounts, host key permissions |
+| Filesystem | SUID and SGID files, capabilities, executables in temporary directories, regular files in `/dev`, world-writable system files, system binaries not managed by a package |
+| Packages | Pending security updates, stale apt lists, automatic updates, apt holds, third-party sources, versions of key software |
+| System | Release support dates and ESM, kernel version, pending reboots, kernel security parameters, CPU vulnerability mitigations |
 
-## 設計原則
+## Design principles
 
-**唯讀。** 工具不會寫入任何檔案，除非你用 `-o` 或按 `s`。以 root 執行時也不會 exec 主機上的任何程式，版本是直接從執行檔內容讀出來的，不會跑 `nginx -v`。`test/e2e/run.sh` 會用 strace 驗證這一點。
+**Read-only.** The tool writes no files unless you pass `-o` or press `s`. Although it runs as root, it never executes a program from the host. Versions are read from the contents of binaries instead of running `nginx -v`. `test/e2e/run.sh` verifies this with strace.
 
-已知例外：讀取 BPF 過濾器時，kernel 可能自動載入 `packet_diag` 模組，效果和執行 `ss -0` 相同。發生時報告會註明，也可以用 `--no-netlink` 關閉。
+Known exception: when the tool reads BPF filters, the kernel may automatically load the `packet_diag` module, the same effect as running `ss -0`. The report says so when this happens, and `--no-netlink` turns it off.
 
-**對外連線只下載公開資料。** 連線對象是 `security-metadata.canonical.com`、`nginx.org` 和 `www.php.net`，都是單純的 GET，不會傳送主機資訊。其中 nginx.org 和 php.net 只有在發現非 Ubuntu 套件時才會連線。
+**Outbound traffic only downloads public data.** The tool connects to `security-metadata.canonical.com`, `nginx.org` and `www.php.net` using plain GET requests that send no information about the host. It contacts nginx.org and php.net only when it finds non-Ubuntu builds.
 
-**CVE 不只比版本號。** Ubuntu 會把修補 backport 到舊版本，`nginx 1.18.0` 可能早已修補，所以 apt 套件一律比對 Canonical 的 OVAL 資料。自行編譯、官方套件庫或 PPA 的版本才比對上游公告。
+**CVE checks do not rely on version numbers alone.** Ubuntu backports fixes to older versions, so `nginx 1.18.0` may already be patched. Apt packages are always compared against Canonical's OVAL data. Only self-compiled, upstream repository and PPA builds are compared against upstream advisories.
 
-**對生產環境溫和。** 工具會把執行緒調成低 CPU 優先權與 idle I/O，並限制最多使用 2 個 CPU。測試時多數掃描在 5 到 60 秒內完成，下載 OVAL 較慢時最久約 2.5 分鐘；測試用容器的檔案不多，檔案很多的主機在全機掃描上會花更久（上限見 `--fs-timeout`）。
+**Gentle on production.** The tool lowers its threads to low CPU priority and idle I/O, and uses at most 2 CPUs. In testing, most scans finished within 5 to 60 seconds, and the slowest took about 2.5 minutes when the OVAL download was slow. The test containers hold few files, so the full filesystem scan will take longer on hosts with many files (see `--fs-timeout` for the limit).
 
-**防範來自主機的惡意內容。** 拒絕跟隨使用者目錄內的 symlink、不會被 FIFO 卡住；process 名稱與檔名內的終端機控制字元會被轉義；指令列與設定內的密碼會被遮罩；`/etc/shadow` 的雜湊讀取後立即丟棄，只保留狀態與演算法。
+**Defends against hostile content on the host.** It refuses to follow symlinks in user directories and cannot be hung by a FIFO. Terminal control characters in process names and file names are escaped. Passwords in command lines and configuration are masked. Hashes from `/etc/shadow` are discarded immediately after reading, keeping only the account status and algorithm.
 
-## 使用限制
+## Limitations
 
-- **未發現異常不代表主機乾淨。** 如果 kernel 已被 rootkit 控制，本機工具看到的結果都可能被竄改。隱藏程序與隱藏模組的檢查能抓到常見手法，抓不到全部。懷疑遭入侵時，請從乾淨媒體開機做離線鑑識。
-- **未檢查不等於通過。** 權限不足、逾時或連不上網路的項目會標示「未檢查」，不會算成通過。
-- **USN 只涵蓋 Ubuntu 已發布修補的漏洞與 apt 套件。** 還沒有修補的 CVE、snap、pip、npm、容器映像內的套件都不在比對範圍內。
-- **雜湊比對的基準是本機 dpkg 資料庫。** 攻擊者若連資料庫一起改，這項就驗不出來。
-- **webshell 檢查是特徵比對。** 能抓到常見樣本，抓不到客製或混淆過的版本。
-- **防火牆只回報狀態。** 工具不會執行 `iptables` 或 `nft`，也看不到雲端安全群組，所以「綁定在非 loopback」不等於真的對外開放。
-- **Livepatch 不會納入判斷。** kernel 項目比對的是版本，已由 Livepatch 修補的 CVE 仍可能列出。
+- **A clean result does not prove a clean host.** If a rootkit controls the kernel, anything a local tool sees may be falsified. The hidden process and hidden module checks catch common techniques, not all of them. If you suspect a compromise, boot from clean media and perform offline forensics.
+- **Not checked does not mean passed.** Items that lacked permission, timed out or could not reach the network are shown as "Not checked" (`skipped` in JSON) and never count as passed.
+- **USN data covers only vulnerabilities Ubuntu has already fixed, and only apt packages.** Unpatched CVEs and packages from snap, pip, npm or container images are out of scope.
+- **Hash checks trust the local dpkg database.** An attacker who also modifies the database will not be detected by this check.
+- **Webshell detection is signature based.** It catches common samples, not customized or obfuscated ones.
+- **Firewalls are reported by status only.** The tool does not run `iptables` or `nft` and cannot see cloud security groups, so "bound to a non-loopback address" does not necessarily mean reachable from outside.
+- **Livepatch is not taken into account.** Kernel results compare versions, so CVEs already fixed by Livepatch may still be listed.
 
-## 無法對外連線的主機
+## Hosts without internet access
 
-在有網路的機器下載對應版本的 OVAL 檔，複製過去後指定：
+On a machine with internet access, download the OVAL file for the host's release, copy it over and point the tool at it:
 
 ```sh
 # bionic=18.04  focal=20.04  jammy=22.04  noble=24.04  resolute=26.04
@@ -116,23 +117,23 @@ curl -fsSLO https://security-metadata.canonical.com/oval/com.ubuntu.jammy.usn.ov
 sudo ./ubuntu-sys-audit-linux-amd64 --offline --oval-file com.ubuntu.jammy.usn.oval.xml.bz2
 ```
 
-資料超過 14 天時，報告會提醒你。
+The report warns you when the data is more than 14 days old.
 
-## 開發
+## Development
 
 ```sh
-make build   # 編譯到 dist/，並產生 SHA256SUMS
-make test    # 單元測試（需要 Docker）
-make e2e     # 每個 Ubuntu 版本都開容器、植入假後門並驗證偵測結果
+make build   # Build into dist/ and generate SHA256SUMS
+make test    # Unit tests (requires Docker)
+make e2e     # Boot a container per Ubuntu release, plant fake backdoors and verify detection
 ```
 
-程式只能在 Linux 上編譯，在 macOS 開發時請把編輯器的 `GOOS` 設為 `linux`，`go build` 與 `go vet` 也要加上 `GOOS=linux`。
+The code only compiles for Linux. When developing on macOS, set `GOOS` to `linux` in your editor and add `GOOS=linux` to `go build` and `go vet`.
 
-`test/e2e/plant.sh` 會建立 UID 0 帳號與 SUID shell，只能在測試容器內執行，腳本也會拒絕在其他環境執行。
+`test/e2e/plant.sh` creates a UID 0 account and SUID shells. Run it only inside the test container; the script refuses to run anywhere else.
 
-## 發布
+## Releasing
 
-推送 `v` 開頭的 tag，GitHub Actions 就會編譯兩種架構並建立 Release：
+Push a tag starting with `v`, and GitHub Actions builds both architectures and creates a release:
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0

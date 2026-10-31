@@ -14,6 +14,8 @@ import (
 	"ubuntu-sys-audit/internal/model"
 )
 
+// sampleReport keeps CJK text on purpose: file names and process names on a
+// host can hold any language, and they must not break the layout.
 func sampleReport() *model.Report {
 	r := &model.Report{
 		Host: model.Host{Hostname: "web-01", OSName: "Ubuntu", OSVersion: "22.04", Kernel: "5.15.0-91-generic", IsRoot: true},
@@ -143,9 +145,9 @@ func TestFilterCategoryAndSearch(t *testing.T) {
 func TestSkippedCategoryNeverLooksPassed(t *testing.T) {
 	m := newResultsModel(t, 120, 30)
 	m.report.Findings = []model.Finding{
-		{Category: model.CatCVE, Severity: model.Skipped, Title: "CVE 比對"},
-		{Category: model.CatWeb, Severity: model.OK, Title: "沒有發現 nginx"},
-		{Category: model.CatWeb, Severity: model.Skipped, Title: "PHP 比對"},
+		{Category: model.CatCVE, Severity: model.Skipped, Title: "CVE check"},
+		{Category: model.CatWeb, Severity: model.OK, Title: "nginx not found"},
+		{Category: model.CatWeb, Severity: model.Skipped, Title: "PHP check"},
 		{Category: model.CatSSH, Severity: model.OK, Title: "ok"},
 		{Category: model.CatNetwork, Severity: model.Skipped},
 		{Category: model.CatNetwork, Severity: model.High},
@@ -160,10 +162,26 @@ func TestSkippedCategoryNeverLooksPassed(t *testing.T) {
 	}
 }
 
+func TestSelectedCategoryTabStaysVisibleOnNarrowTerminals(t *testing.T) {
+	for _, width := range []int{minWidth, 80, 100} {
+		m := newResultsModel(t, width, 24)
+		for i, cat := range m.cats {
+			m.catIdx = i + 1
+			tabs := m.renderCategoryTabs()
+			if !strings.Contains(ansi.Strip(tabs), cat.Label()) {
+				t.Errorf("width %d: selected tab %q not visible in %q", width, cat.Label(), ansi.Strip(tabs))
+			}
+			if got := lipgloss.Width(tabs); got > width {
+				t.Errorf("width %d: tabs are %d cells wide", width, got)
+			}
+		}
+	}
+}
+
 func TestSmallTerminalShowsMessage(t *testing.T) {
 	m := New(context.Background(), checks.Options{Version: "test"})
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 10})
-	if !strings.Contains(m.View().Content, "太小") {
+	if !strings.Contains(m.View().Content, "too small") {
 		t.Errorf("expected too small message, got %q", m.View().Content)
 	}
 }

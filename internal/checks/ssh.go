@@ -59,13 +59,13 @@ func parseSSHDConfig(path string, depth int, out map[string]string, stop *bool) 
 func checkSSHConfig(c *Context) []model.Finding {
 	const cat = model.CatSSH
 	if _, err := os.Stat("/etc/ssh/sshd_config"); err != nil {
-		return []model.Finding{finding("ssh.config", cat, model.Info, "未安裝 OpenSSH server（找不到 sshd_config）")}
+		return []model.Finding{finding("ssh.config", cat, model.Info, "OpenSSH server is not installed (no sshd_config)")}
 	}
 	cfg := map[string]string{}
 	stop := false
 	parseSSHDConfig("/etc/ssh/sshd_config", 0, cfg, &stop)
 	if len(cfg) == 0 && !c.Host.IsRoot {
-		return []model.Finding{needRoot("ssh.config", cat, "sshd 設定")}
+		return []model.Finding{needRoot("ssh.config", cat, "sshd configuration")}
 	}
 	get := func(key, def string) string {
 		if v, ok := cfg[key]; ok {
@@ -81,36 +81,36 @@ func checkSSHConfig(c *Context) []model.Finding {
 	}
 	switch get("permitrootlogin", "prohibit-password") {
 	case "yes":
-		add("root_login", model.High, "允許 root 用密碼登入 SSH", "PermitRootLogin yes。", "改成 PermitRootLogin no 或 prohibit-password，再重新載入 sshd。")
+		add("root_login", model.High, "Root can log in over SSH with a password", "PermitRootLogin yes.", "Set PermitRootLogin to no or prohibit-password, then reload sshd.")
 	case "without-password", "prohibit-password", "forced-commands-only":
-		add("root_login", model.Info, "root 僅可用金鑰登入 SSH", "", "若不需要 root 直接登入，可改為 PermitRootLogin no。")
+		add("root_login", model.Info, "Root can log in over SSH with keys only", "", "If direct root login is not needed, set PermitRootLogin no.")
 	default:
-		add("root_login", model.OK, "已禁止 root 登入 SSH", "", "")
+		add("root_login", model.OK, "Root login over SSH is disabled", "", "")
 	}
 	if get("permitemptypasswords", "no") == "yes" {
-		add("empty_passwords", model.Critical, "sshd 允許空白密碼登入", "PermitEmptyPasswords yes。", "改為 no 並重新載入 sshd。")
+		add("empty_passwords", model.Critical, "sshd allows empty passwords", "PermitEmptyPasswords yes.", "Set it to no and reload sshd.")
 	}
 	if get("passwordauthentication", "yes") == "yes" {
-		add("password_auth", model.Medium, "SSH 允許密碼登入", "未明確關閉時預設就是允許，容易遭到暴力嘗試。", "確認金鑰可用後設定 PasswordAuthentication no。")
+		add("password_auth", model.Medium, "SSH allows password login", "This is the default unless explicitly disabled, and it invites brute force attempts.", "Once keys work, set PasswordAuthentication no.")
 	} else {
-		add("password_auth", model.OK, "SSH 已關閉密碼登入", "", "")
+		add("password_auth", model.OK, "SSH password login is disabled", "", "")
 	}
 	if get("permituserenvironment", "no") != "no" {
-		add("user_env", model.Medium, "sshd 允許使用者設定環境變數", "攻擊者可藉此注入 LD_PRELOAD 繞過限制。", "設定 PermitUserEnvironment no。")
+		add("user_env", model.Medium, "sshd lets users set environment variables", "An attacker can use this to inject LD_PRELOAD and bypass restrictions.", "Set PermitUserEnvironment no.")
 	}
 	if v := get("authorizedkeyscommand", "none"); v != "none" {
-		f := finding("ssh.keys_command", cat, model.Medium, "sshd 設定了 AuthorizedKeysCommand")
-		f.Detail = "授權金鑰來自外部程式。請確認這是預期設定，它也是常見的後門位置。"
+		f := finding("ssh.keys_command", cat, model.Medium, "sshd uses AuthorizedKeysCommand")
+		f.Detail = "Authorized keys come from an external program. Confirm this is intended, since it is also a common place for a backdoor."
 		f.Evidence = []string{cfg["authorizedkeyscommand"]}
 		out = append(out, f)
 	}
 	if v := cfg["authorizedkeysfile"]; v != "" && v != ".ssh/authorized_keys .ssh/authorized_keys2" && v != ".ssh/authorized_keys" {
-		f := finding("ssh.keys_file", cat, model.Medium, "sshd 使用非預設的 AuthorizedKeysFile")
+		f := finding("ssh.keys_file", cat, model.Medium, "sshd uses a non-default AuthorizedKeysFile")
 		f.Evidence = []string{v}
 		out = append(out, f)
 	}
 	if v := cfg["port"]; v != "" {
-		f := finding("ssh.port", cat, model.Info, "sshd 使用自訂 Port："+v)
+		f := finding("ssh.port", cat, model.Info, "sshd uses custom port: "+v)
 		out = append(out, f)
 	}
 
@@ -118,18 +118,18 @@ func checkSSHConfig(c *Context) []model.Finding {
 	keys, _ := filepath.Glob("/etc/ssh/ssh_host_*_key")
 	for _, k := range keys {
 		if st, err := os.Stat(k); err == nil && st.Mode().Perm()&0o077 != 0 {
-			badKeys = append(badKeys, fmt.Sprintf("%s  權限 %o", k, st.Mode().Perm()))
+			badKeys = append(badKeys, fmt.Sprintf("%s  mode %o", k, st.Mode().Perm()))
 		}
 	}
 	if len(badKeys) > 0 {
-		f := finding("ssh.host_keys", cat, model.High, "SSH host key 權限過寬")
+		f := finding("ssh.host_keys", cat, model.High, "SSH host keys have overly broad permissions")
 		f.Evidence = badKeys
 		f.Remediation = "chmod 600 /etc/ssh/ssh_host_*_key"
 		out = append(out, f)
 	}
 	if _, err := os.Stat("/etc/ssh/sshrc"); err == nil {
-		f := finding("ssh.sshrc", cat, model.High, "存在 /etc/ssh/sshrc")
-		f.Detail = "每次 SSH 登入都會執行此腳本。Ubuntu 預設沒有這個檔案。"
+		f := finding("ssh.sshrc", cat, model.High, "/etc/ssh/sshrc exists")
+		f.Detail = "This script runs on every SSH login. Ubuntu does not ship this file by default."
 		out = append(out, f)
 	}
 	return out
@@ -175,7 +175,7 @@ func fingerprint(blob string) string {
 	raw, err := base64.StdEncoding.DecodeString(blob)
 	if err != nil {
 		if raw, err = base64.RawStdEncoding.DecodeString(blob); err != nil {
-			return "無效金鑰"
+			return "invalid key"
 		}
 	}
 	sum := sha256.Sum256(raw)
@@ -185,7 +185,7 @@ func fingerprint(blob string) string {
 func checkAuthorizedKeys(c *Context) []model.Finding {
 	const cat = model.CatSSH
 	if !c.Host.IsRoot {
-		return []model.Finding{needRoot("ssh.keys", cat, "SSH 授權金鑰")}
+		return []model.Finding{needRoot("ssh.keys", cat, "SSH authorized keys")}
 	}
 	min := uidMin()
 	var out []model.Finding
@@ -200,11 +200,11 @@ func checkAuthorizedKeys(c *Context) []model.Finding {
 			}
 			if st.Mode()&os.ModeSymlink != 0 {
 				target, _ := os.Readlink(p)
-				badPerms = append(badPerms, p+" 是 symlink，指向 "+target)
+				badPerms = append(badPerms, p+" is a symlink to "+target)
 				continue
 			}
 			if st.Mode().Perm()&0o022 != 0 {
-				badPerms = append(badPerms, fmt.Sprintf("%s  權限 %o", p, st.Mode().Perm()))
+				badPerms = append(badPerms, fmt.Sprintf("%s  mode %o", p, st.Mode().Perm()))
 			}
 			b, err := fsx.ReadNoFollow(p, 1<<20)
 			if err != nil {
@@ -219,7 +219,7 @@ func checkAuthorizedKeys(c *Context) []model.Finding {
 				entry := fmt.Sprintf("%s  %s  %s  %s", u.Name, typ, fingerprint(blob), comment)
 				inventory = append(inventory, entry)
 				if strings.Contains(opts, "command=") {
-					forced = append(forced, entry+"  選項："+opts)
+					forced = append(forced, entry+"  options: "+opts)
 				}
 				if typ == "ssh-dss" {
 					deprecated = append(deprecated, entry)
@@ -230,37 +230,37 @@ func checkAuthorizedKeys(c *Context) []model.Finding {
 			}
 		}
 		if _, err := os.Lstat(filepath.Join(u.Home, ".ssh/rc")); err == nil {
-			f := finding("ssh.user_rc", cat, model.High, u.Name+" 有 ~/.ssh/rc")
-			f.Detail = "該使用者每次 SSH 登入都會執行此腳本，常被用來持久化。"
+			f := finding("ssh.user_rc", cat, model.High, u.Name+" has ~/.ssh/rc")
+			f.Detail = "This script runs on each of this user's SSH logins, which makes it a common persistence trick."
 			f.Evidence = []string{filepath.Join(u.Home, ".ssh/rc")}
 			out = append(out, f)
 		}
 	}
-	summary := finding("ssh.keys", cat, model.Info, fmt.Sprintf("共 %d 把 SSH 授權金鑰", total))
-	summary.Detail = "請逐一確認清單內都是認得的金鑰。攻擊者最常見的後門就是多塞一把。"
+	summary := finding("ssh.keys", cat, model.Info, fmt.Sprintf("SSH authorized keys (%d)", total))
+	summary.Detail = "Confirm you recognize every key listed. Adding one more key is the most common backdoor."
 	summary.Evidence = inventory
 	out = append(out, summary)
 	if len(serviceKeys) > 0 {
-		f := finding("ssh.service_keys", cat, model.High, "系統帳號有 SSH 授權金鑰")
-		f.Detail = "例如 /var/www/.ssh/authorized_keys，常見於網站被入侵之後。"
+		f := finding("ssh.service_keys", cat, model.High, "System accounts have SSH authorized keys")
+		f.Detail = "For example /var/www/.ssh/authorized_keys, which often appears after a website is compromised."
 		f.Evidence = serviceKeys
 		out = append(out, f)
 	}
 	if len(forced) > 0 {
-		f := finding("ssh.forced_command", cat, model.Medium, "授權金鑰帶有 command= 選項")
-		f.Detail = "常用於限制備份帳號，也可能用來在登入時偷偷執行指令。請確認內容。"
+		f := finding("ssh.forced_command", cat, model.Medium, "Authorized keys use the command= option")
+		f.Detail = "Often used to restrict backup accounts, but it can also run commands silently at login. Check the content."
 		f.Evidence = forced
 		out = append(out, f)
 	}
 	if len(deprecated) > 0 {
-		f := finding("ssh.dsa_keys", cat, model.Medium, "授權金鑰使用已淘汰的 DSA")
+		f := finding("ssh.dsa_keys", cat, model.Medium, "Authorized keys use deprecated DSA")
 		f.Evidence = deprecated
 		out = append(out, f)
 	}
 	if len(badPerms) > 0 {
-		f := finding("ssh.key_perms", cat, model.Medium, "authorized_keys 權限異常")
+		f := finding("ssh.key_perms", cat, model.Medium, "authorized_keys has unsafe permissions")
 		f.Evidence = badPerms
-		f.Remediation = "chmod 600，且不要用 symlink。"
+		f.Remediation = "Use chmod 600 and avoid symlinks."
 		out = append(out, f)
 	}
 	return out

@@ -35,38 +35,38 @@ type Event struct {
 func All() []Check {
 	const quick = 30 * time.Second
 	return []Check{
-		{"system.os", "作業系統與支援狀態", model.CatSystem, quick, checkOS},
-		{"system.kernel", "Kernel 版本與重開機狀態", model.CatSystem, quick, checkKernel},
-		{"system.sysctl", "Kernel 安全參數", model.CatSystem, quick, checkSysctl},
-		{"system.cpu", "CPU 漏洞緩解", model.CatSystem, quick, checkCPUVulns},
-		{"accounts.users", "帳號清單", model.CatAccounts, quick, checkUsers},
-		{"accounts.privilege", "特權帳號與 sudo", model.CatAccounts, quick, checkPrivilege},
-		{"accounts.logins", "登入紀錄", model.CatAccounts, quick, checkLogins},
-		{"ssh.config", "sshd 設定", model.CatSSH, quick, checkSSHConfig},
-		{"ssh.keys", "SSH 授權金鑰", model.CatSSH, quick, checkAuthorizedKeys},
-		{"network.dns53", "53 Port 與 DNS 流量", model.CatNetwork, quick, checkDNS53},
-		{"network.listeners", "監聽中的 Port", model.CatNetwork, quick, checkListeners},
-		{"network.raw", "Raw／Packet Socket（BPFDoor）", model.CatNetwork, quick, checkRawSockets},
-		{"network.iface", "網卡混雜模式", model.CatNetwork, quick, checkPromisc},
-		{"network.firewall", "防火牆狀態", model.CatNetwork, quick, checkFirewall},
-		{"network.docker", "Docker 與容器", model.CatNetwork, quick, checkDocker},
-		{"process.suspicious", "可疑程序", model.CatProcess, quick, checkProcesses},
-		{"process.libs", "已刪除的函式庫", model.CatProcess, quick, checkStaleLibs},
-		{"process.hidden", "隱藏程序", model.CatProcess, time.Minute, checkHiddenProcesses},
-		{"integrity.preload", "ld.so.preload 與核心掛鉤", model.CatIntegrity, quick, checkPreload},
-		{"integrity.modules", "Kernel 模組", model.CatIntegrity, quick, checkModules},
-		{"integrity.pam", "PAM 模組", model.CatIntegrity, quick, checkPAM},
-		{"integrity.binaries", "系統執行檔雜湊", model.CatIntegrity, 3 * time.Minute, checkBinaries},
-		{"persistence.files", "排程與啟動腳本", model.CatPersistence, time.Minute, checkPersistence},
-		{"persistence.systemd", "systemd 服務", model.CatPersistence, time.Minute, checkSystemd},
-		{"filesystem.walk", "SUID、Capabilities 與暫存目錄", model.CatFilesystem, 6 * time.Minute, checkFilesystem},
-		{"packages.updates", "安全更新與自動更新", model.CatPackages, time.Minute, checkUpdates},
-		{"packages.sources", "第三方套件來源", model.CatPackages, quick, checkAptSources},
-		{"packages.inventory", "重要軟體版本", model.CatPackages, quick, checkInventory},
-		{"web.shell", "Webshell 掃描", model.CatWeb, 4 * time.Minute, checkWebshells},
-		{"web.nginx", "nginx 版本與設定", model.CatWeb, 2 * time.Minute, checkNginx},
-		{"web.php", "PHP 版本與設定", model.CatWeb, 2 * time.Minute, checkPHP},
-		{"cve.usn", "CVE 比對（Ubuntu USN）", model.CatCVE, 5 * time.Minute, checkCVE},
+		{"system.os", "OS and support status", model.CatSystem, quick, checkOS},
+		{"system.kernel", "Kernel version and reboot status", model.CatSystem, quick, checkKernel},
+		{"system.sysctl", "Kernel security parameters", model.CatSystem, quick, checkSysctl},
+		{"system.cpu", "CPU vulnerability mitigations", model.CatSystem, quick, checkCPUVulns},
+		{"accounts.users", "Account list", model.CatAccounts, quick, checkUsers},
+		{"accounts.privilege", "Privileged accounts and sudo", model.CatAccounts, quick, checkPrivilege},
+		{"accounts.logins", "Login history", model.CatAccounts, quick, checkLogins},
+		{"ssh.config", "sshd configuration", model.CatSSH, quick, checkSSHConfig},
+		{"ssh.keys", "SSH authorized keys", model.CatSSH, quick, checkAuthorizedKeys},
+		{"network.dns53", "Port 53 and DNS traffic", model.CatNetwork, quick, checkDNS53},
+		{"network.listeners", "Listening ports", model.CatNetwork, quick, checkListeners},
+		{"network.raw", "Raw and packet sockets (BPFDoor)", model.CatNetwork, quick, checkRawSockets},
+		{"network.iface", "Promiscuous interfaces", model.CatNetwork, quick, checkPromisc},
+		{"network.firewall", "Firewall status", model.CatNetwork, quick, checkFirewall},
+		{"network.docker", "Docker and containers", model.CatNetwork, quick, checkDocker},
+		{"process.suspicious", "Suspicious processes", model.CatProcess, quick, checkProcesses},
+		{"process.libs", "Deleted libraries still in use", model.CatProcess, quick, checkStaleLibs},
+		{"process.hidden", "Hidden processes", model.CatProcess, time.Minute, checkHiddenProcesses},
+		{"integrity.preload", "ld.so.preload", model.CatIntegrity, quick, checkPreload},
+		{"integrity.modules", "Kernel modules", model.CatIntegrity, quick, checkModules},
+		{"integrity.pam", "PAM modules", model.CatIntegrity, quick, checkPAM},
+		{"integrity.binaries", "System binary hashes", model.CatIntegrity, 3 * time.Minute, checkBinaries},
+		{"persistence.files", "Scheduled jobs and startup scripts", model.CatPersistence, time.Minute, checkPersistence},
+		{"persistence.systemd", "systemd services", model.CatPersistence, time.Minute, checkSystemd},
+		{"filesystem.walk", "SUID, capabilities and temp directories", model.CatFilesystem, 6 * time.Minute, checkFilesystem},
+		{"packages.updates", "Security and automatic updates", model.CatPackages, time.Minute, checkUpdates},
+		{"packages.sources", "Third-party package sources", model.CatPackages, quick, checkAptSources},
+		{"packages.inventory", "Key software versions", model.CatPackages, quick, checkInventory},
+		{"web.shell", "Webshell scan", model.CatWeb, 4 * time.Minute, checkWebshells},
+		{"web.nginx", "nginx version and configuration", model.CatWeb, 2 * time.Minute, checkNginx},
+		{"web.php", "PHP version and configuration", model.CatWeb, 2 * time.Minute, checkPHP},
+		{"cve.usn", "CVE check (Ubuntu USN)", model.CatCVE, 5 * time.Minute, checkCVE},
 	}
 }
 
@@ -156,7 +156,7 @@ func runOne(parent context.Context, base *Context, chk Check) ([]model.Finding, 
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				done <- result{err: fmt.Sprintf("內部錯誤：%v", r)}
+				done <- result{err: fmt.Sprintf("internal error: %v", r)}
 			}
 		}()
 		done <- result{found: chk.Run(base.withCtx(ctx))}
@@ -165,15 +165,15 @@ func runOne(parent context.Context, base *Context, chk Check) ([]model.Finding, 
 	select {
 	case r := <-done:
 		if r.err != "" {
-			return []model.Finding{skipped(chk.ID+".error", chk.Category, chk.Name+"：檢查失敗", r.err)}, r.err
+			return []model.Finding{skipped(chk.ID+".error", chk.Category, chk.Name+": check failed", r.err)}, r.err
 		}
 		return r.found, ""
 	case <-ctx.Done():
-		msg := "超過時間上限 " + timeout.String() + "，此項未完成。"
+		msg := "Hit the " + timeout.String() + " time limit, so this check did not finish."
 		if parent.Err() != nil {
-			msg = "掃描已中止。"
+			msg = "Scan aborted."
 		}
-		return []model.Finding{skipped(chk.ID+".timeout", chk.Category, chk.Name+"：未完成", msg)}, msg
+		return []model.Finding{skipped(chk.ID+".timeout", chk.Category, chk.Name+": not finished", msg)}, msg
 	}
 }
 

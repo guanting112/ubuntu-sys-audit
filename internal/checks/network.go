@@ -22,7 +22,7 @@ func ownerLabel(view *procinfo.NetView, ino uint64) string {
 	if p := view.ByInode[ino]; p != nil {
 		return p.Label()
 	}
-	return "（找不到擁有者）"
+	return "(no owner found)"
 }
 
 // trustedExe requires the binary to belong to a package or a container, since
@@ -48,37 +48,37 @@ func isStubAddress(a netip.Addr) bool {
 // classifyDNS decides how a socket bound to port 53 should be reported.
 func classifyDNS(c *Context, s procinfo.Socket, p *procinfo.Process) (model.Severity, string) {
 	if !c.Host.IsRoot && p == nil {
-		return model.Skipped, "沒有 root 權限，無法判斷擁有者"
+		return model.Skipped, "Cannot determine the owner without root"
 	}
 	if p == nil {
 		if c.Host.InContainer {
-			return model.Medium, "在容器內執行，看不到宿主機的程序，無法判斷擁有者。請在宿主機上確認"
+			return model.Medium, "Running inside a container, which cannot see host processes, so the owner is unknown. Confirm on the host"
 		}
 		if !s.HostNS {
-			return model.Medium, "位於其他網路命名空間，找不到擁有者"
+			return model.Medium, "In another network namespace with no owner found"
 		}
-		return model.Critical, "找不到擁有這個 socket 的程序，可能被隱藏"
+		return model.Critical, "No process owns this socket, so it may be hidden"
 	}
 	name := base(p.Exe)
 	known := dnsDaemons[name]
 	switch {
 	case !known:
 		if p.InContainer || !s.HostNS {
-			return model.High, "容器內的非 DNS 程式佔用 53 Port"
+			return model.High, "A non-DNS program inside a container holds port 53"
 		}
-		return model.Critical, "不是已知的 DNS 服務，卻在監聽 53 Port"
+		return model.Critical, "Listening on port 53 but not a known DNS service"
 	case !trustedExe(c, p):
-		return model.Critical, "名稱像 DNS 服務，但執行檔不屬於任何套件（或已刪除）"
+		return model.Critical, "Named like a DNS service, but its binary belongs to no package or has been deleted"
 	case isStubAddress(s.LocalIP) && (name == "systemd-resolved" || name == "systemd-resolve"):
-		return model.OK, "systemd-resolved 的本機 stub，屬正常行為"
+		return model.OK, "The local stub of systemd-resolved, which is normal"
 	case s.LocalIP.IsLoopback():
-		return model.Info, "本機 DNS 服務，只綁定 loopback"
+		return model.Info, "Local DNS service bound to loopback only"
 	case p.InContainer || !s.HostNS:
-		return model.Info, "容器內的 DNS 服務"
+		return model.Info, "DNS service inside a container"
 	case s.LocalIP.IsUnspecified():
-		return model.Medium, "DNS 服務綁定所有網卡，請確認不是 open resolver"
+		return model.Medium, "DNS service bound to all interfaces. Confirm it is not an open resolver"
 	}
-	return model.Info, "DNS 服務綁定特定網卡"
+	return model.Info, "DNS service bound to a specific interface"
 }
 
 func resolverAddrs() map[netip.Addr]bool {
@@ -124,7 +124,7 @@ func resolverAddrs() map[netip.Addr]bool {
 func checkDNS53(c *Context) []model.Finding {
 	const cat = model.CatNetwork
 	if _, err := c.Procs(); err != nil {
-		return []model.Finding{skipped("network.dns53", cat, "53 Port 檢查", err.Error())}
+		return []model.Finding{skipped("network.dns53", cat, "Port 53 check", err.Error())}
 	}
 	view := c.Net()
 	var out []model.Finding
@@ -142,24 +142,24 @@ func checkDNS53(c *Context) []model.Finding {
 			okLines = append(okLines, line)
 			continue
 		}
-		f := finding("network.dns53.listener", cat, sev, "53 Port 監聽："+s.Proto+" "+s.Local())
+		f := finding("network.dns53.listener", cat, sev, "Port 53 listener: "+s.Proto+" "+s.Local())
 		f.Detail = why
 		f.Evidence = []string{line}
 		if p != nil && len(p.Cmdline) > 0 {
-			f.Evidence = append(f.Evidence, "指令："+p.CmdlineString())
+			f.Evidence = append(f.Evidence, "Command: "+p.CmdlineString())
 		}
 		f.Focus = true
 		if sev <= model.High {
-			f.Remediation = "確認這個程序的來源。若非預期，先保留現場（/proc/<pid>/exe、記憶體、對外連線）再隔離主機。"
+			f.Remediation = "Find out where this process came from. If unexpected, preserve evidence (/proc/<pid>/exe, memory, outbound connections), then isolate the host."
 		}
 		out = append(out, f)
 	}
 	if len(okLines) > 0 {
-		f := finding("network.dns53.stub", cat, model.OK, "systemd-resolved 的本機 stub 監聽 53 Port（正常）")
+		f := finding("network.dns53.stub", cat, model.OK, "systemd-resolved local stub on port 53 (normal)")
 		f.Evidence = okLines
 		out = append(out, f)
 	} else if listeners == 0 {
-		out = append(out, finding("network.dns53.none", cat, model.OK, "沒有程序監聽 53 Port"))
+		out = append(out, finding("network.dns53.none", cat, model.OK, "Nothing listens on port 53"))
 	}
 
 	// Traffic to port 53 from anything but the configured resolvers or a DNS
@@ -180,8 +180,8 @@ func checkDNS53(c *Context) []model.Finding {
 		odd = append(odd, fmt.Sprintf("%s %s -> %s  %s", s.Proto, s.Local(), s.Remote(), ownerLabel(view, s.Inode)))
 	}
 	if len(odd) > 0 {
-		f := finding("network.dns53.outbound", cat, model.Medium, "有程序直接連到非系統設定的 DNS 伺服器")
-		f.Detail = "可能只是寫死 8.8.8.8 的程式，也可能是 DNS tunnel 或 C2。請確認程序與目的地。"
+		f := finding("network.dns53.outbound", cat, model.Medium, "Processes connect directly to DNS servers the system does not use")
+		f.Detail = "This may just be a program with 8.8.8.8 hardcoded, or it may be a DNS tunnel or C2. Check the process and destination."
 		f.Evidence = odd
 		f.Focus = true
 		out = append(out, f)
@@ -197,7 +197,7 @@ type riskyPort struct {
 var riskyPorts = map[uint16]riskyPort{
 	21: {model.Medium, "FTP"}, 23: {model.High, "Telnet"}, 111: {model.Medium, "rpcbind"},
 	139: {model.Medium, "SMB"}, 445: {model.Medium, "SMB"}, 2049: {model.Medium, "NFS"},
-	2375: {model.Critical, "Docker API（未加密）"}, 3306: {model.Medium, "MySQL"},
+	2375: {model.Critical, "Docker API (unencrypted)"}, 3306: {model.Medium, "MySQL"},
 	5432: {model.Medium, "PostgreSQL"}, 5900: {model.Medium, "VNC"}, 6379: {model.High, "Redis"},
 	9200: {model.High, "Elasticsearch"}, 10250: {model.Medium, "kubelet"},
 	11211: {model.High, "Memcached"}, 27017: {model.High, "MongoDB"},
@@ -209,7 +209,7 @@ var kernelPorts = map[uint16]bool{111: true, 2049: true, 4789: true, 6081: true,
 func checkListeners(c *Context) []model.Finding {
 	const cat = model.CatNetwork
 	if _, err := c.Procs(); err != nil {
-		return []model.Finding{skipped("network.listeners", cat, "監聽中的 Port", err.Error())}
+		return []model.Finding{skipped("network.listeners", cat, "Listening ports", err.Error())}
 	}
 	view := c.Net()
 	type row struct {
@@ -228,7 +228,7 @@ func checkListeners(c *Context) []model.Finding {
 		p := view.ByInode[s.Inode]
 		scope := ""
 		if !s.HostNS {
-			scope = " [其他網路命名空間]"
+			scope = " [other network namespace]"
 		}
 		line := fmt.Sprintf("%-4s %-28s %s%s", s.Proto, s.Local(), ownerLabel(view, s.Inode), scope)
 		rows = append(rows, row{line, s.LocalPort})
@@ -259,27 +259,27 @@ func checkListeners(c *Context) []model.Finding {
 	for i, r := range rows {
 		lines[i] = r.line
 	}
-	inv := finding("network.listeners", cat, model.Info, fmt.Sprintf("%d 個監聽中的 Port，其中 %d 個對外", len(rows), public))
+	inv := finding("network.listeners", cat, model.Info, fmt.Sprintf("Listening ports (%d, %d non-loopback)", len(rows), public))
 	inv.Evidence = lines
 	inv.Focus = true
 	out = append(out, inv)
 
 	if len(badOwner) > 0 {
-		f := finding("network.listener_bad_exe", cat, model.Critical, "有 Port 由暫存目錄或已刪除的執行檔監聽")
-		f.Detail = "正常服務不會這樣跑。這很像惡意程式執行後刪除自身。"
+		f := finding("network.listener_bad_exe", cat, model.Critical, "Ports held by a binary in a temp directory or a deleted binary")
+		f.Detail = "Normal services do not run this way. It looks like malware that deleted itself after starting."
 		f.Evidence = badOwner
-		f.Remediation = "先保留 /proc/<pid>/exe 與連線資訊，再隔離主機調查。"
+		f.Remediation = "Preserve /proc/<pid>/exe and connection details, then isolate the host and investigate."
 		out = append(out, f)
 	}
 	if len(orphan) > 0 {
-		f := finding("network.listener_orphan", cat, model.Medium, "有監聽中的 Port 找不到擁有者")
-		f.Detail = "kernel 內建服務（NFS、WireGuard）會這樣顯示，但 rootkit 隱藏程序時也是如此。"
+		f := finding("network.listener_orphan", cat, model.Medium, "Listening ports with no owner")
+		f.Detail = "Kernel services such as NFS and WireGuard look like this, but so does a process hidden by a rootkit."
 		f.Evidence = orphan
 		out = append(out, f)
 	}
 	if len(unmanaged) > 0 {
-		f := finding("network.listener_unmanaged", cat, model.Medium, "對外 Port 由非套件管理的程式監聽")
-		f.Detail = "自行編譯或手動安裝的服務都會列在這裡，它們不會收到 apt 的安全更新。"
+		f := finding("network.listener_unmanaged", cat, model.Medium, "Non-loopback ports held by programs outside package management")
+		f.Detail = "Self-compiled or manually installed services appear here. They get no security updates from apt."
 		f.Evidence = unmanaged
 		out = append(out, f)
 	}
@@ -289,10 +289,10 @@ func checkListeners(c *Context) []model.Finding {
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i].name < keys[j].name })
 	for _, r := range keys {
-		f := finding("network.exposed."+strings.ToLower(strings.Fields(r.name)[0]), cat, r.sev, r.name+" 綁定在非 loopback 位址")
-		f.Detail = "這類服務不該直接暴露。工具看不到雲端安全群組等外部防火牆，請一併確認。"
+		f := finding("network.exposed."+strings.ToLower(strings.Fields(r.name)[0]), cat, r.sev, r.name+" is bound to a non-loopback address")
+		f.Detail = "Services like this should not be exposed directly. This tool cannot see external firewalls such as cloud security groups, so check those too."
 		f.Evidence = exposed[r]
-		f.Remediation = "改綁 127.0.0.1 或內網位址，並用防火牆限制來源。"
+		f.Remediation = "Bind to 127.0.0.1 or a private address, and restrict sources with a firewall."
 		out = append(out, f)
 	}
 	return out
@@ -321,10 +321,10 @@ var rawAllow = map[string]bool{
 func checkRawSockets(c *Context) []model.Finding {
 	const cat = model.CatNetwork
 	if !c.Host.IsRoot {
-		return []model.Finding{needRoot("network.raw", cat, "Raw／Packet Socket")}
+		return []model.Finding{needRoot("network.raw", cat, "Raw and packet sockets")}
 	}
 	if _, err := c.Procs(); err != nil {
-		return []model.Finding{skipped("network.raw", cat, "Raw／Packet Socket", err.Error())}
+		return []model.Finding{skipped("network.raw", cat, "Raw and packet sockets", err.Error())}
 	}
 	view := c.Net()
 	var out []model.Finding
@@ -342,57 +342,57 @@ func checkRawSockets(c *Context) []model.Finding {
 		}
 		switch {
 		case len(magic) > 0:
-			f := finding("network.bpfdoor", cat, model.Critical, "Packet socket 的 BPF 過濾器含 BPFDoor 特徵值")
-			f.Detail = "比對到已公開的 BPFDoor magic number：" + strings.Join(magic, ", ") + "。BPFDoor 不開 Port，靠這種過濾器等待喚醒封包，所以防火牆和一般 Port 檢查都看不到它。"
+			f := finding("network.bpfdoor", cat, model.Critical, "Packet socket BPF filter contains BPFDoor magic values")
+			f.Detail = "Matched published BPFDoor magic numbers: " + strings.Join(magic, ", ") + ". BPFDoor opens no port and waits for a wake-up packet through a filter like this, so firewalls and ordinary port checks cannot see it."
 			f.Evidence = []string{line}
-			f.Remediation = "視為主機已遭入侵。先隔離主機並保留記憶體與 /proc/<pid>/exe，再做鑑識。"
+			f.Remediation = "Treat the host as compromised. Isolate it, preserve memory and /proc/<pid>/exe, then perform forensics."
 			f.Refs = []string{"https://www.trendmicro.com/en_us/research/25/d/bpfdoor-hidden-controller.html"}
 			f.Focus = true
 			out = append(out, f)
 		case p == nil:
 			if s.HostNS && !c.Host.InContainer {
-				f := finding("network.packet_orphan", cat, model.High, "Packet socket 找不到擁有者")
-				f.Detail = "這個 socket 能看到所有封包，卻沒有可見的程序持有它，可能遭到隱藏。"
+				f := finding("network.packet_orphan", cat, model.High, "Packet socket has no owner")
+				f.Detail = "This socket can see all packets, yet no visible process holds it, so the owner may be hidden."
 				f.Evidence = []string{line}
 				out = append(out, f)
 			}
 		case dnsPort && !(packetAllow[base(p.Exe)] && trustedExe(c, p)):
-			f := finding("network.packet_dns", cat, model.Critical, "未知程序用 BPF 過濾 53 Port 封包")
-			f.Detail = "它不必開 Port 就能收到 DNS 流量，這正是被動後門的做法。"
+			f := finding("network.packet_dns", cat, model.Critical, "Unknown process filters port 53 packets with BPF")
+			f.Detail = "It receives DNS traffic without opening a port, which is exactly how passive backdoors work."
 			f.Evidence = []string{line}
 			f.Focus = true
 			out = append(out, f)
 		case packetAllow[base(p.Exe)] && trustedExe(c, p):
 			allowed = append(allowed, line)
 		case trustedExe(c, p):
-			f := finding("network.packet_review", cat, model.Medium, "套件程式開啟 Packet socket："+base(p.Exe))
-			f.Detail = "這支程式來自套件，但不在已知會抓封包的清單內，請確認用途。"
+			f := finding("network.packet_review", cat, model.Medium, "Packaged program opened a packet socket: "+base(p.Exe))
+			f.Detail = "This program comes from a package but is not on the list of known packet capture tools. Confirm its purpose."
 			f.Evidence = []string{line}
 			out = append(out, f)
 		default:
-			f := finding("network.packet_unknown", cat, model.High, "非套件程式開啟 Packet socket："+p.Comm)
-			f.Detail = "這個 socket 能在防火牆之前看到封包，常被用來做被動後門或側錄。"
+			f := finding("network.packet_unknown", cat, model.High, "Unpackaged program opened a packet socket: "+p.Comm)
+			f.Detail = "This socket sees packets before the firewall, which is often used for passive backdoors or sniffing."
 			f.Evidence = []string{line}
 			if len(p.Cmdline) > 0 {
-				f.Evidence = append(f.Evidence, "指令："+p.CmdlineString())
+				f.Evidence = append(f.Evidence, "Command: "+p.CmdlineString())
 			}
 			f.Focus = true
 			out = append(out, f)
 		}
 	}
 	if len(allowed) > 0 {
-		f := finding("network.packet_known", cat, model.Info, fmt.Sprintf("%d 個由已知程式開啟的 Packet socket", len(allowed)))
+		f := finding("network.packet_known", cat, model.Info, fmt.Sprintf("Packet sockets held by known programs (%d)", len(allowed)))
 		f.Evidence = allowed
 		out = append(out, f)
 	}
 	if len(view.Packet) == 0 {
-		out = append(out, finding("network.packet_none", cat, model.OK, "沒有 Packet socket"))
+		out = append(out, finding("network.packet_none", cat, model.OK, "No packet sockets"))
 	}
 	if filterErr != "" {
-		out = append(out, skipped("network.bpf_filters", cat, "BPF 過濾器內容", filterErr+"。仍有列出 Packet socket 與擁有者，但沒有比對 BPFDoor 特徵值。"))
+		out = append(out, skipped("network.bpf_filters", cat, "BPF filter contents", filterErr+". Packet sockets and owners are still listed, but BPFDoor magic values were not checked."))
 	} else if moduleLoaded {
-		f := finding("network.packet_diag", cat, model.Info, "讀取 BPF 過濾器時，kernel 自動載入了 packet_diag 模組")
-		f.Detail = "與執行 ss -0 的效果相同。若不希望載入，請加上 --no-netlink。"
+		f := finding("network.packet_diag", cat, model.Info, "The kernel auto-loaded packet_diag while BPF filters were read")
+		f.Detail = "Same effect as running ss -0. To avoid it, use --no-netlink."
 		out = append(out, f)
 	}
 
@@ -401,21 +401,21 @@ func checkRawSockets(c *Context) []model.Finding {
 			continue
 		}
 		p := view.ByInode[s.Inode]
-		line := fmt.Sprintf("%s 協定=%d  %s", s.Proto, s.LocalPort, ownerLabel(view, s.Inode))
+		line := fmt.Sprintf("%s protocol=%d  %s", s.Proto, s.LocalPort, ownerLabel(view, s.Inode))
 		switch {
 		case p == nil && (!s.HostNS || c.Host.InContainer):
 		case p == nil:
-			f := finding("network.raw_orphan", cat, model.High, "Raw socket 找不到擁有者")
+			f := finding("network.raw_orphan", cat, model.High, "Raw socket has no owner")
 			f.Evidence = []string{line}
 			out = append(out, f)
 		case rawAllow[base(p.Exe)] && trustedExe(c, p):
 		case trustedExe(c, p):
-			f := finding("network.raw_review", cat, model.Medium, "套件程式開啟 Raw socket："+base(p.Exe))
+			f := finding("network.raw_review", cat, model.Medium, "Packaged program opened a raw socket: "+base(p.Exe))
 			f.Evidence = []string{line}
 			out = append(out, f)
 		default:
-			f := finding("network.raw_unknown", cat, model.High, "非套件程式開啟 Raw socket："+p.Comm)
-			f.Detail = "Raw socket 可收發任意 IP 封包，ICMP 後門就靠它。"
+			f := finding("network.raw_unknown", cat, model.High, "Unpackaged program opened a raw socket: "+p.Comm)
+			f.Detail = "Raw sockets can send and receive arbitrary IP packets, which is how ICMP backdoors work."
 			f.Evidence = []string{line}
 			out = append(out, f)
 		}
@@ -427,7 +427,7 @@ func checkPromisc(c *Context) []model.Finding {
 	const cat = model.CatNetwork
 	ifaces, err := os.ReadDir("/sys/class/net")
 	if err != nil {
-		return []model.Finding{skipped("network.iface", cat, "網卡混雜模式", err.Error())}
+		return []model.Finding{skipped("network.iface", cat, "Promiscuous interfaces", err.Error())}
 	}
 	var promisc []string
 	for _, e := range ifaces {
@@ -444,22 +444,22 @@ func checkPromisc(c *Context) []model.Finding {
 		promisc = append(promisc, name)
 	}
 	if len(promisc) == 0 {
-		return []model.Finding{finding("network.iface", cat, model.OK, "沒有網卡處於混雜模式")}
+		return []model.Finding{finding("network.iface", cat, model.OK, "No interfaces in promiscuous mode")}
 	}
-	f := finding("network.iface", cat, model.Medium, "網卡處於混雜模式")
-	f.Detail = "混雜模式會收到不屬於本機的封包，可能是 tcpdump，也可能是側錄工具。"
+	f := finding("network.iface", cat, model.Medium, "Interfaces in promiscuous mode")
+	f.Detail = "Promiscuous mode receives packets meant for other hosts. It may be tcpdump, or it may be a sniffer."
 	f.Evidence = promisc
 	return []model.Finding{f}
 }
 
 func checkFirewall(c *Context) []model.Finding {
 	const cat = model.CatNetwork
-	ufw := "未安裝"
+	ufw := "not installed"
 	if b, err := fsx.Read("/etc/ufw/ufw.conf", 1<<14); err == nil {
-		ufw = "已停用"
+		ufw = "disabled"
 		for _, line := range strings.Split(string(b), "\n") {
 			if strings.EqualFold(strings.TrimSpace(line), "ENABLED=yes") {
-				ufw = "已啟用"
+				ufw = "enabled"
 			}
 		}
 	}
@@ -468,13 +468,13 @@ func checkFirewall(c *Context) []model.Finding {
 	if st, err := os.Stat("/etc/nftables.conf"); err == nil && st.Size() > 0 {
 		nft = true
 	}
-	f := finding("network.firewall", cat, model.Info, "防火牆：ufw "+ufw)
+	f := finding("network.firewall", cat, model.Info, "Firewall: ufw "+ufw)
 	f.Evidence = []string{
-		"ufw：" + ufw,
-		"已載入的 iptables 表：" + strings.Join(tables, ", "),
-		fmt.Sprintf("/etc/nftables.conf 存在：%v", nft),
+		"ufw: " + ufw,
+		"Loaded iptables tables: " + strings.Join(tables, ", "),
+		fmt.Sprintf("/etc/nftables.conf exists: %v", nft),
 	}
-	f.Detail = "工具不會執行 iptables 或 nft，所以只回報狀態，不判斷規則內容，也看不到雲端安全群組。"
+	f.Detail = "This tool does not run iptables or nft, so it reports status only. It does not evaluate rules and cannot see cloud security groups."
 	return []model.Finding{f}
 }
 
@@ -500,8 +500,8 @@ func checkDocker(c *Context) []model.Finding {
 	var out []model.Finding
 	sock, err := os.Stat("/var/run/docker.sock")
 	if err == nil && sock.Mode().Perm()&0o002 != 0 {
-		f := finding("docker.socket_perm", cat, model.Critical, "docker.sock 任何人都可寫入")
-		f.Detail = "能寫入 docker.sock 就能取得 root。權限是 " + fmt.Sprintf("%o", sock.Mode().Perm()) + "。"
+		f := finding("docker.socket_perm", cat, model.Critical, "docker.sock is world-writable")
+		f.Detail = "Anyone who can write to docker.sock can get root. Its mode is " + fmt.Sprintf("%o", sock.Mode().Perm()) + "."
 		f.Remediation = "chmod 660 /var/run/docker.sock"
 		out = append(out, f)
 	}
@@ -510,7 +510,7 @@ func checkDocker(c *Context) []model.Finding {
 		if err != nil {
 			return out
 		}
-		return append(out, finding("docker.containers", cat, model.Info, "已安裝 Docker，目前沒有容器"))
+		return append(out, finding("docker.containers", cat, model.Info, "Docker is installed with no containers"))
 	}
 	var running, stopped, privileged []string
 	for _, d := range dirs {
@@ -526,7 +526,7 @@ func checkDocker(c *Context) []model.Finding {
 			continue
 		}
 		name := strings.TrimPrefix(cfg.Name, "/")
-		line := name + "  映像=" + cfg.Config.Image
+		line := name + "  image=" + cfg.Config.Image
 		if cfg.State.Running {
 			running = append(running, line)
 		} else {
@@ -549,20 +549,20 @@ func checkDocker(c *Context) []model.Finding {
 		}
 		for _, bind := range hc.Binds {
 			if strings.HasPrefix(bind, "/:") || strings.HasPrefix(bind, "/var/run/docker.sock:") {
-				bad = append(bad, "掛載 "+strings.SplitN(bind, ":", 2)[0])
+				bad = append(bad, "mounts "+strings.SplitN(bind, ":", 2)[0])
 			}
 		}
 		if len(bad) > 0 && cfg.State.Running {
-			privileged = append(privileged, name+"："+strings.Join(bad, ", "))
+			privileged = append(privileged, name+": "+strings.Join(bad, ", "))
 		}
 	}
-	f := finding("docker.containers", cat, model.Info, fmt.Sprintf("%d 個執行中容器，%d 個已停止", len(running), len(stopped)))
-	f.Detail = "CVE 類別只比對宿主機的 apt 套件，容器映像內的套件沒有掃描。執行中容器的 nginx／PHP 版本則會在 Web 類別列出。"
+	f := finding("docker.containers", cat, model.Info, fmt.Sprintf("Containers: %d running, %d stopped", len(running), len(stopped)))
+	f.Detail = "The CVE check covers the host's apt packages only, not packages inside container images. nginx and PHP versions from running containers appear under Web."
 	f.Evidence = append(running, stopped...)
 	out = append(out, f)
 	if len(privileged) > 0 {
-		g := finding("docker.privileged", cat, model.High, "容器具有逃逸到宿主機的權限")
-		g.Detail = "這些容器一旦被入侵，等於宿主機被入侵。"
+		g := finding("docker.privileged", cat, model.High, "Containers have privileges that allow escaping to the host")
+		g.Detail = "If one of these containers is compromised, so is the host."
 		g.Evidence = privileged
 		out = append(out, g)
 	}
@@ -571,12 +571,12 @@ func checkDocker(c *Context) []model.Finding {
 
 func loadPacketFilters(c *Context) (map[uint64][]procinfo.BPFInstruction, string, bool) {
 	if c.Opts.NoNetlink {
-		return nil, "已用 --no-netlink 關閉", false
+		return nil, "Disabled by --no-netlink", false
 	}
 	before := procinfo.PacketDiagModuleLoaded()
 	filters, err := procinfo.PacketFilters(5 * time.Second)
 	if err != nil {
-		return nil, "無法讀取：" + err.Error(), false
+		return nil, "Cannot read them: " + err.Error(), false
 	}
 	return filters, "", !before && procinfo.PacketDiagModuleLoaded()
 }

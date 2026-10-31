@@ -25,27 +25,28 @@ import (
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
-const usage = `ubuntu-sys-audit：Ubuntu 18.04 到 26.04 的唯讀安全檢測工具
+const usage = `ubuntu-sys-audit: read-only security audit for Ubuntu 18.04 to 26.04
 
-用法：
-  sudo ./ubuntu-sys-audit [選項]
+Usage:
+  sudo ./ubuntu-sys-audit [options]
 
-有終端機時開啟 TUI。沒有 TTY 時（例如 ssh host 'sudo ./ubuntu-sys-audit'）自動輸出 JSON。
+Opens the TUI on a terminal. Without a TTY, for example under
+ssh host 'sudo ./ubuntu-sys-audit', it writes JSON instead.
 
-選項：
-  --json               輸出 JSON 到 stdout，不開 TUI
-  --text               輸出純文字到 stdout，不開 TUI
-  --min-severity LV    純文字模式只列出此等級以上：critical、high、medium、info、ok、skipped（預設 medium）
-  -o, --output FILE    另外把 JSON 報告存到 FILE（權限 0600）
-  --offline            不連網。沒有指定 --oval-file 時，不比對 CVE
-  --oval-file PATH     使用本機的 OVAL 檔（.xml 或 .xml.bz2），給無法對外連線的主機使用
-  --proxy URL          下載公告資料時使用的 HTTP proxy
-  --skip-fs            略過全機檔案掃描（SUID、Capabilities、暫存目錄）
-  --fs-timeout TIME    全機檔案掃描的時間上限（預設 5m）
-  --no-netlink         不讀取 BPF 過濾器，避免 kernel 自動載入 packet_diag 模組
-  --version            顯示版本
+Options:
+  --json               Write JSON to stdout without opening the TUI
+  --text               Write plain text to stdout without opening the TUI
+  --min-severity LV    In text mode, list only this level and above: critical, high, medium, info, ok, skipped (default medium)
+  -o, --output FILE    Also save the JSON report to FILE (mode 0600)
+  --offline            Do not use the network. CVEs are not checked unless --oval-file is given
+  --oval-file PATH     Use a local OVAL file (.xml or .xml.bz2), for hosts without internet access
+  --proxy URL          HTTP proxy for downloading advisory data
+  --skip-fs            Skip the full filesystem scan (SUID, capabilities, temp directories)
+  --fs-timeout TIME    Time limit for the full filesystem scan (default 5m)
+  --no-netlink         Do not read BPF filters, which keeps the kernel from loading packet_diag
+  --version            Show the version
 
-結束代碼：0 無待處理項目，1 有中等級項目，2 有嚴重或高等級項目，130 掃描被中止
+Exit codes: 0 nothing to act on, 1 medium findings, 2 critical or high findings, 130 scan aborted
 `
 
 func main() {
@@ -84,7 +85,7 @@ func run() int {
 	}
 	threshold, ok := parseSeverity(minSev)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "--min-severity 的值無效：%s\n", minSev)
+		fmt.Fprintf(os.Stderr, "invalid --min-severity value: %s\n", minSev)
 		return 64
 	}
 
@@ -105,31 +106,31 @@ func run() int {
 	if interactive {
 		report, err := tui.Run(ctx, opts)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "TUI 錯誤：", err)
+			fmt.Fprintln(os.Stderr, "TUI error:", err)
 			return 70
 		}
 		if report == nil {
-			fmt.Fprintln(os.Stderr, "掃描已中止。")
+			fmt.Fprintln(os.Stderr, "Scan aborted.")
 			return 130
 		}
 		fmt.Println(output.Summary(report))
 		if outPath != "" {
 			if err := output.SaveJSON(outPath, report); err != nil {
-				fmt.Fprintln(os.Stderr, "無法寫入報告：", err)
+				fmt.Fprintln(os.Stderr, "Cannot write report:", err)
 				return 74
 			}
-			fmt.Println("報告已存到", outPath)
+			fmt.Println("Report saved to", outPath)
 		}
 		return report.ExitCode()
 	}
 
 	if os.Geteuid() != 0 {
-		fmt.Fprintln(os.Stderr, "注意：沒有以 root 執行，部分項目未檢查。請用 sudo 執行。")
+		fmt.Fprintln(os.Stderr, "Warning: not running as root, so some items were not checked. Run with sudo.")
 	}
 	report := checks.Run(ctx, opts, nil)
 	if outPath != "" {
 		if err := output.SaveJSON(outPath, report); err != nil {
-			fmt.Fprintln(os.Stderr, "無法寫入報告：", err)
+			fmt.Fprintln(os.Stderr, "Cannot write report:", err)
 			return 74
 		}
 	}
@@ -137,7 +138,7 @@ func run() int {
 		output.Text(os.Stdout, report, threshold)
 	} else {
 		if err := output.JSON(os.Stdout, report); err != nil {
-			fmt.Fprintln(os.Stderr, "無法輸出 JSON：", err)
+			fmt.Fprintln(os.Stderr, "Cannot write JSON:", err)
 			return 74
 		}
 	}

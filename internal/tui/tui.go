@@ -74,7 +74,7 @@ const (
 )
 
 var filterLabels = map[filterMode]string{
-	filterAll: "全部", filterActionable: "待處理（中以上）", filterUrgent: "嚴重與高", filterSkipped: "未檢查",
+	filterAll: "All", filterActionable: "Actionable (medium+)", filterUrgent: "Critical and high", filterSkipped: "Not checked",
 }
 
 type scanEventMsg checks.Event
@@ -134,7 +134,7 @@ func New(ctx context.Context, opts checks.Options) *Model {
 	bar := progress.New(progress.WithDefaultBlend(), progress.WithWidth(40))
 	ti := textinput.New()
 	ti.Prompt = "/ "
-	ti.Placeholder = "搜尋標題與證據內容，Enter 確定，Esc 取消"
+	ti.Placeholder = "Search titles and evidence. Enter to apply, Esc to cancel"
 	vp := viewport.New()
 	return &Model{
 		ctx: cctx, cancel: cancel, opts: opts,
@@ -387,10 +387,10 @@ func (m *Model) save() {
 	}
 	path := output.DefaultFilename(m.report)
 	if err := output.SaveJSON(path, m.report); err != nil {
-		m.status = "儲存失敗：" + err.Error()
+		m.status = "Save failed: " + err.Error()
 		return
 	}
-	m.status = "已儲存 " + path
+	m.status = "Saved " + path
 }
 
 func (m *Model) buildCategories() {
@@ -508,7 +508,7 @@ func (m *Model) layout() {
 func (m *Model) refreshDetail() {
 	f := m.current()
 	if f == nil {
-		m.detail.SetContent(m.st.subtle.Render("沒有符合條件的項目。"))
+		m.detail.SetContent(m.st.subtle.Render("No matching items."))
 		m.detail.GotoTop()
 		return
 	}
@@ -527,11 +527,11 @@ func (m *Model) renderDetail(f model.Finding, width int) string {
 		b.WriteString("\n" + wrap.Inherit(st.text).Render(f.Detail) + "\n")
 	}
 	if f.Remediation != "" {
-		b.WriteString("\n" + st.section.Render("處理方式") + "\n")
+		b.WriteString("\n" + st.section.Render("Remediation") + "\n")
 		b.WriteString(wrap.Inherit(st.accent).Render(f.Remediation) + "\n")
 	}
 	if len(f.Evidence) > 0 {
-		b.WriteString("\n" + st.section.Render(fmt.Sprintf("證據（%d）", len(f.Evidence))) + "\n")
+		b.WriteString("\n" + st.section.Render(fmt.Sprintf("Evidence (%d)", len(f.Evidence))) + "\n")
 		inner := lipgloss.NewStyle().Width(max(width-2, 10)).Inherit(st.text)
 		for _, e := range f.Evidence {
 			lines := strings.Split(inner.Render(e), "\n")
@@ -545,7 +545,7 @@ func (m *Model) renderDetail(f model.Finding, width int) string {
 		}
 	}
 	if len(f.Refs) > 0 {
-		b.WriteString("\n" + st.section.Render("參考資料") + "\n")
+		b.WriteString("\n" + st.section.Render("References") + "\n")
 		for _, r := range f.Refs {
 			b.WriteString(wrap.Inherit(st.subtle).Render(r) + "\n")
 		}
@@ -559,7 +559,7 @@ func (m *Model) View() tea.View {
 	switch {
 	case m.width == 0:
 	case m.width < minWidth || m.height < minHeight:
-		content = fmt.Sprintf("終端機太小（%dx%d），至少需要 %dx%d。", m.width, m.height, minWidth, minHeight)
+		content = fmt.Sprintf("Terminal too small (%dx%d), need at least %dx%d.", m.width, m.height, minWidth, minHeight)
 	case m.phase == phaseScan:
 		content = m.viewScan()
 	default:
@@ -584,7 +584,7 @@ func (m *Model) viewScan() string {
 	var b strings.Builder
 	b.WriteString(m.viewHeaderLine() + "\n")
 	if !m.host.IsRoot {
-		b.WriteString(st.warn.Render("沒有以 root 執行，部分項目會標示為未檢查。請改用 sudo。") + "\n")
+		b.WriteString(st.warn.Render("Not running as root, so some items will be marked not checked. Use sudo.") + "\n")
 	}
 	b.WriteString("\n")
 	total := len(m.rows)
@@ -625,9 +625,9 @@ func (m *Model) viewScan() string {
 	}
 	b.WriteString("\n" + m.renderLiveCounts())
 	if n := len(m.alerts); n > 0 {
-		b.WriteString("  " + st.sevStyle(model.Critical).Render(ansi.Truncate("最新："+m.alerts[n-1], max(m.width-44, 10), "…")))
+		b.WriteString("  " + st.sevStyle(model.Critical).Render(ansi.Truncate("Latest: "+m.alerts[n-1], max(m.width-44, 10), "…")))
 	}
-	b.WriteString("\n" + st.key.Render("q") + st.keyHelp.Render(" 中止掃描"))
+	b.WriteString("\n" + st.key.Render("q") + st.keyHelp.Render(" abort scan"))
 	return b.String()
 }
 
@@ -640,7 +640,7 @@ func (m *Model) renderLiveCounts() string {
 		}
 	}
 	if len(parts) == 0 {
-		return m.st.faint.Render("尚無結果")
+		return m.st.faint.Render("No results yet")
 	}
 	return strings.Join(parts, m.st.faint.Render(" · "))
 }
@@ -690,10 +690,10 @@ func (m *Model) viewResults() string {
 
 	b.WriteString(m.viewHeaderLine() + "\n")
 	if !m.host.IsRoot {
-		b.WriteString(st.warn.Render(ansi.Truncate("沒有以 root 執行：標示未檢查的項目請用 sudo 重新掃描。", m.width, "…")) + "\n")
+		b.WriteString(st.warn.Render(ansi.Truncate("Not running as root. Rescan with sudo to cover items marked not checked.", m.width, "…")) + "\n")
 	} else {
 		dur := time.Duration(m.report.DurationMS) * time.Millisecond
-		note := fmt.Sprintf("唯讀掃描 %s 完成 · 主機若已遭 rootkit 控制，本機結果可能被竄改；未發現異常不代表主機乾淨", dur.Round(100*time.Millisecond))
+		note := fmt.Sprintf("Read-only scan finished in %s · A rootkit can falsify local results, so a clean result does not prove a clean host", dur.Round(100*time.Millisecond))
 		b.WriteString(st.faint.Render(ansi.Truncate(note, m.width, "…")) + "\n")
 	}
 	var chips []string
@@ -708,10 +708,10 @@ func (m *Model) viewResults() string {
 	}
 	line := strings.Join(chips, " ")
 	if m.filter != filterAll {
-		line += "  " + st.accent.Render("篩選："+filterLabels[m.filter])
+		line += "  " + st.accent.Render("Filter: "+filterLabels[m.filter])
 	}
 	if m.query != "" {
-		line += "  " + st.accent.Render("搜尋："+ansi.Truncate(m.query, 20, "…"))
+		line += "  " + st.accent.Render("Search: "+ansi.Truncate(m.query, 20, "…"))
 	}
 	b.WriteString(ansi.Truncate(line, m.width, "…") + "\n\n")
 
@@ -785,7 +785,7 @@ func (m *Model) renderCategories(width, height int) string {
 		}
 		lines = append(lines, dot+" "+st.text.Render(padded)+st.sevStyle(symbol).Render(count))
 	}
-	row(0, "全部", "")
+	row(0, "All", "")
 	for i, c := range m.cats {
 		row(i+1, c.Label(), c)
 	}
@@ -797,7 +797,7 @@ func (m *Model) renderCategories(width, height int) string {
 
 func (m *Model) renderCategoryTabs() string {
 	st := m.st
-	labels := []string{"全部"}
+	labels := []string{"All"}
 	for _, c := range m.cats {
 		labels = append(labels, c.Label())
 	}
@@ -809,13 +809,23 @@ func (m *Model) renderCategoryTabs() string {
 			parts = append(parts, st.subtle.Render(" "+l+" "))
 		}
 	}
-	return ansi.Truncate(strings.Join(parts, ""), m.width, "…")
+	// The tabs may not all fit on a narrow terminal, so scroll to keep the
+	// selected one on screen. One cell is reserved for the leading marker.
+	start := 0
+	for start < m.catIdx && lipgloss.Width(strings.Join(parts[start:m.catIdx+1], "")) > m.width-1 {
+		start++
+	}
+	line := strings.Join(parts[start:], "")
+	if start > 0 {
+		line = st.faint.Render("…") + line
+	}
+	return ansi.Truncate(line, m.width, "…")
 }
 
 func (m *Model) renderList(width, height int) string {
 	st := m.st
 	if len(m.visible) == 0 {
-		return st.subtle.Render("沒有符合條件的項目。")
+		return st.subtle.Render("No matching items.")
 	}
 	var lines []string
 	end := min(m.listTop+height, len(m.visible))
@@ -848,9 +858,9 @@ func (m *Model) renderFooter() string {
 		return m.search.View()
 	}
 	hint := func(k, h string) string { return st.key.Render(k) + st.keyHelp.Render(" "+h) }
-	keys := []string{hint("↑↓", "移動"), hint("tab", "切換窗格"), hint("f", "篩選"), hint("/", "搜尋"), hint("s", "存 JSON"), hint("q", "離開")}
+	keys := []string{hint("↑↓", "move"), hint("tab", "switch pane"), hint("f", "filter"), hint("/", "search"), hint("s", "save JSON"), hint("q", "quit")}
 	if m.focus == paneDetail {
-		keys[0] = hint("↑↓", "捲動")
+		keys[0] = hint("↑↓", "scroll")
 	}
 	left := fmt.Sprintf("%d/%d", min(m.cursor+1, len(m.visible)), len(m.visible))
 	line := st.faint.Render(left) + "  " + strings.Join(keys, st.faint.Render("  "))

@@ -21,16 +21,16 @@ type lineRule struct {
 
 // Patterns with no ordinary use in a scheduled job or login script.
 var maliciousRules = []lineRule{
-	{regexp.MustCompile(`(curl|wget|fetch)\b[^|;&]*\|\s*(sudo\s+)?(/\S*/)?(ba|z|da|k)?sh\b`), "下載後直接交給 shell"},
-	{regexp.MustCompile(`/dev/(tcp|udp)/`), "bash 網路重導向（reverse shell）"},
-	{regexp.MustCompile(`\bbash\s+-i\b`), "互動式 bash（reverse shell）"},
-	{regexp.MustCompile(`\b(nc|ncat|netcat)\b[^|;&]*\s-[a-zA-Z]*[ec]\b`), "netcat 執行指令"},
-	{regexp.MustCompile(`python[0-9.]*\s+-c\s*['"].*socket`), "python 單行 socket"},
-	{regexp.MustCompile(`perl\s+-e\s*['"].*socket`), "perl 單行 socket"},
-	{regexp.MustCompile(`socat\b.*\b(exec|system):`), "socat 執行指令"},
-	{regexp.MustCompile(`base64\s+(-d|--decode)\b[^|;&]*\|\s*(ba|z|da)?sh\b`), "解碼 base64 後交給 shell"},
+	{regexp.MustCompile(`(curl|wget|fetch)\b[^|;&]*\|\s*(sudo\s+)?(/\S*/)?(ba|z|da|k)?sh\b`), "downloads and pipes into a shell"},
+	{regexp.MustCompile(`/dev/(tcp|udp)/`), "bash network redirection (reverse shell)"},
+	{regexp.MustCompile(`\bbash\s+-i\b`), "interactive bash (reverse shell)"},
+	{regexp.MustCompile(`\b(nc|ncat|netcat)\b[^|;&]*\s-[a-zA-Z]*[ec]\b`), "netcat executes a command"},
+	{regexp.MustCompile(`python[0-9.]*\s+-c\s*['"].*socket`), "python one-liner socket"},
+	{regexp.MustCompile(`perl\s+-e\s*['"].*socket`), "perl one-liner socket"},
+	{regexp.MustCompile(`socat\b.*\b(exec|system):`), "socat executes a command"},
+	{regexp.MustCompile(`base64\s+(-d|--decode)\b[^|;&]*\|\s*(ba|z|da)?sh\b`), "decodes base64 into a shell"},
 	{regexp.MustCompile(`\bmkfifo\b.*\b(nc|ncat|sh)\b`), "named pipe reverse shell"},
-	{regexp.MustCompile(`\b(xmrig|kinsing|kdevtmpfsi)\b|stratum\+tcp://`), "挖礦程式特徵"},
+	{regexp.MustCompile(`\b(xmrig|kinsing|kdevtmpfsi)\b|stratum\+tcp://`), "crypto miner indicator"},
 }
 
 var tempPathRe = regexp.MustCompile(`(^|[\s'";&|(=])((?:/tmp|/var/tmp|/dev/shm)/[^\s'";&|)]+)`)
@@ -76,20 +76,20 @@ var persistTargets = []persistTarget{
 	{glob: "/etc/cron.daily/*", group: "cron"},
 	{glob: "/etc/cron.weekly/*", group: "cron"},
 	{glob: "/etc/cron.monthly/*", group: "cron"},
-	{glob: "/var/spool/cron/crontabs/*", group: "使用者 crontab", noFollow: true},
-	{glob: "/var/spool/cron/atjobs/*", group: "at 工作", noFollow: true},
+	{glob: "/var/spool/cron/crontabs/*", group: "user crontab", noFollow: true},
+	{glob: "/var/spool/cron/atjobs/*", group: "at job", noFollow: true},
 	{glob: "/etc/rc.local", group: "rc.local"},
 	{glob: "/etc/init.d/*", group: "init.d"},
-	{glob: "/etc/profile", group: "登入腳本"},
-	{glob: "/etc/bash.bashrc", group: "登入腳本"},
-	{glob: "/etc/environment", group: "登入腳本"},
-	{glob: "/etc/profile.d/*", group: "登入腳本"},
+	{glob: "/etc/profile", group: "login script"},
+	{glob: "/etc/bash.bashrc", group: "login script"},
+	{glob: "/etc/environment", group: "login script"},
+	{glob: "/etc/profile.d/*", group: "login script"},
 	{glob: "/etc/update-motd.d/*", group: "motd"},
 	{glob: "/etc/apt/apt.conf.d/*", group: "apt hook"},
 	{glob: "/etc/udev/rules.d/*", group: "udev"},
-	{glob: "/etc/ld.so.conf.d/*", group: "動態連結設定"},
-	{glob: "/etc/modules-load.d/*", group: "模組載入"},
-	{glob: "/etc/modprobe.d/*", group: "模組載入"},
+	{glob: "/etc/ld.so.conf.d/*", group: "dynamic linker config"},
+	{glob: "/etc/modules-load.d/*", group: "module loading"},
+	{glob: "/etc/modprobe.d/*", group: "module loading"},
 }
 
 var userInitFiles = []string{
@@ -127,9 +127,9 @@ func checkPersistence(c *Context) []model.Finding {
 				continue
 			}
 			if name := matchMalicious(line); name != "" {
-				malicious = append(malicious, fmt.Sprintf("%s（%s）：%s", path, name, line))
+				malicious = append(malicious, fmt.Sprintf("%s (%s): %s", path, name, line))
 			} else if !owned && referencesTempExec(line) {
-				tempRefs = append(tempRefs, path+"："+line)
+				tempRefs = append(tempRefs, path+": "+line)
 			}
 		}
 		if owned || userFile || expectedUnowned.MatchString(path) {
@@ -137,7 +137,7 @@ func checkPersistence(c *Context) []model.Finding {
 		}
 		entry := path
 		if st, err := os.Lstat(path); err == nil && st.ModTime().After(cutoff) {
-			entry += "（7 天內修改）"
+			entry += " (modified in the last 7 days)"
 		}
 		// Crontab entries are the content an operator actually wants to read.
 		if strings.HasPrefix(path, "/var/spool/cron/crontabs/") {
@@ -148,7 +148,7 @@ func checkPersistence(c *Context) []model.Finding {
 				}
 			}
 			for _, e := range strings.Split(entry, "\n")[1:] {
-				unowned[group] = append(unowned[group], base(path)+"："+e)
+				unowned[group] = append(unowned[group], base(path)+": "+e)
 			}
 			return
 		}
@@ -169,26 +169,26 @@ func checkPersistence(c *Context) []model.Finding {
 	}
 	for _, u := range c.Homes() {
 		for _, name := range userInitFiles {
-			scan(filepath.Join(u.Home, name), "家目錄登入腳本", true, true)
+			scan(filepath.Join(u.Home, name), "home login script", true, true)
 		}
 		auto, _ := filepath.Glob(filepath.Join(u.Home, ".config/autostart/*"))
 		for _, a := range auto {
-			scan(a, "桌面自動啟動", true, false)
+			scan(a, "desktop autostart", true, false)
 		}
 	}
 
 	var out []model.Finding
 	if len(malicious) > 0 {
-		f := finding("persistence.malicious", cat, model.Critical, fmt.Sprintf("%d 行排程或登入腳本含惡意特徵", len(malicious)))
-		f.Detail = "這些寫法幾乎只出現在入侵後的持久化，例如下載後直接執行或 reverse shell。"
+		f := finding("persistence.malicious", cat, model.Critical, fmt.Sprintf("Scheduled job or login script lines with malicious signs (%d)", len(malicious)))
+		f.Detail = "These patterns rarely appear outside post-intrusion persistence, such as downloading and running code or reverse shells."
 		f.Evidence = malicious
-		f.Remediation = "先備份檔案當證據，再移除，並調查入侵途徑。"
+		f.Remediation = "Back up the file as evidence, remove the entry and investigate how the attacker got in."
 		out = append(out, f)
 	}
 	if len(tempRefs) > 0 {
-		f := finding("persistence.temp_exec", cat, model.High, "排程或登入腳本從暫存目錄執行程式")
+		f := finding("persistence.temp_exec", cat, model.High, "Scheduled jobs or login scripts run programs from temp directories")
 		f.Evidence = tempRefs
-		f.Remediation = "確認用途。暫存目錄任何人都能寫入，這本身就有提權風險。"
+		f.Remediation = "Confirm the purpose. Anyone can write to temp directories, which is a privilege escalation risk in itself."
 		out = append(out, f)
 	}
 	var groups []string
@@ -203,13 +203,13 @@ func checkPersistence(c *Context) []model.Finding {
 		}
 	}
 	if len(ev) > 0 {
-		f := finding("persistence.unowned", cat, model.Info, fmt.Sprintf("%d 筆排程與啟動項目不屬於任何套件", len(ev)))
-		f.Detail = "這些是管理者自行加入的項目，也是攻擊者會放持久化的地方。請確認都認得。"
+		f := finding("persistence.unowned", cat, model.Info, fmt.Sprintf("Scheduled and startup items that belong to no package (%d)", len(ev)))
+		f.Detail = "Administrators add items here, and attackers hide persistence here. Confirm you recognize them all."
 		f.Evidence = ev
 		out = append(out, f)
 	}
 	if len(malicious)+len(tempRefs) == 0 {
-		out = append(out, finding("persistence.clean", cat, model.OK, fmt.Sprintf("已掃描 %d 個排程與啟動檔案，沒有惡意特徵", scanned)))
+		out = append(out, finding("persistence.clean", cat, model.OK, fmt.Sprintf("Scanned %d scheduled and startup files, no malicious signs", scanned)))
 	}
 	return out
 }
@@ -255,18 +255,18 @@ func checkSystemd(c *Context) []model.Finding {
 			cmd := strings.TrimLeft(m[2], "-@:+!")
 			execs = append(execs, cmd)
 			if name := matchMalicious(cmd); name != "" {
-				malicious = append(malicious, fmt.Sprintf("%s（%s）：%s", path, name, cmd))
+				malicious = append(malicious, fmt.Sprintf("%s (%s): %s", path, name, cmd))
 				continue
 			}
 			first := strings.Fields(cmd + " x")[0]
 			if inTemp(first) {
-				tempExec = append(tempExec, path+"："+cmd)
+				tempExec = append(tempExec, path+": "+cmd)
 			}
 		}
 		if !c.Owned(path) && len(execs) > 0 {
 			entry := path + " -> " + execs[0]
 			if st, err := os.Lstat(path); err == nil && st.ModTime().After(cutoff) {
-				entry = "（7 天內修改）" + entry
+				entry = "(modified in the last 7 days) " + entry
 			}
 			unowned = append(unowned, entry)
 		}
@@ -305,26 +305,26 @@ func checkSystemd(c *Context) []model.Finding {
 	}
 	var out []model.Finding
 	if len(malicious) > 0 {
-		f := finding("persistence.systemd_malicious", cat, model.Critical, "systemd 服務含惡意特徵")
+		f := finding("persistence.systemd_malicious", cat, model.Critical, "systemd services with malicious signs")
 		f.Evidence = malicious
-		f.Remediation = "先備份 unit 檔當證據，再 systemctl disable --now 停用，並調查入侵途徑。"
+		f.Remediation = "Back up the unit file as evidence, stop it with systemctl disable --now and investigate how the attacker got in."
 		out = append(out, f)
 	}
 	if len(tempExec) > 0 {
-		f := finding("persistence.systemd_temp", cat, model.Critical, "systemd 服務從暫存目錄執行程式")
-		f.Detail = "暫存目錄內的東西不該被 systemd 當成服務執行。"
+		f := finding("persistence.systemd_temp", cat, model.Critical, "systemd services run programs from temp directories")
+		f.Detail = "Nothing in a temp directory should run as a systemd service."
 		f.Evidence = tempExec
 		out = append(out, f)
 	}
 	if len(unowned) > 0 {
 		sort.Strings(unowned)
-		f := finding("persistence.systemd_unowned", cat, model.Info, fmt.Sprintf("%d 個 systemd 服務不屬於任何套件", len(unowned)))
-		f.Detail = "自行部署的服務都會列在這裡，請確認都認得。"
+		f := finding("persistence.systemd_unowned", cat, model.Info, fmt.Sprintf("systemd services that belong to no package (%d)", len(unowned)))
+		f.Detail = "Services you deployed yourself appear here. Confirm you recognize them all."
 		f.Evidence = unowned
 		out = append(out, f)
 	}
 	if len(malicious)+len(tempExec) == 0 {
-		out = append(out, finding("persistence.systemd_clean", cat, model.OK, fmt.Sprintf("已掃描 %d 個 systemd unit，沒有惡意特徵", scanned)))
+		out = append(out, finding("persistence.systemd_clean", cat, model.OK, fmt.Sprintf("Scanned %d systemd units, no malicious signs", scanned)))
 	}
 	return out
 }

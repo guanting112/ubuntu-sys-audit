@@ -3,6 +3,7 @@ package checks
 import (
 	"strings"
 	"testing"
+	"unicode"
 
 	"ubuntu-sys-audit/internal/model"
 )
@@ -14,6 +15,55 @@ const nginxPage = `<html><body><ul>
 <li><p>Everything<br>Severity: low<br><a href="x">CVE-2009-0003</a><br>Vulnerable: all</p></li>
 <li><p>Navigation entry, not an advisory</p></li>
 </ul></body></html>`
+
+func containsHan(s string) bool {
+	return strings.ContainsFunc(s, func(r rune) bool { return unicode.Is(unicode.Han, r) })
+}
+
+func TestUITextIsEnglish(t *testing.T) {
+	for _, c := range All() {
+		if containsHan(c.Name) {
+			t.Errorf("check %s has a non English name: %s", c.ID, c.Name)
+		}
+	}
+	for _, sev := range model.AllSeverities {
+		if containsHan(sev.Label()) {
+			t.Errorf("severity label not English: %s", sev.Label())
+		}
+	}
+	for _, cat := range model.Categories {
+		if containsHan(cat.Label()) {
+			t.Errorf("category label not English: %s", cat.Label())
+		}
+	}
+}
+
+func TestPlural(t *testing.T) {
+	for _, c := range []struct {
+		n    int
+		noun string
+		want string
+	}{
+		{1, "CVE", "1 CVE"},
+		{0, "CVE", "0 CVEs"},
+		{2, "security notice", "2 security notices"},
+		{1, "nginx.org advisory", "1 nginx.org advisory"},
+		{23, "nginx.org advisory", "23 nginx.org advisories"},
+	} {
+		if got := plural(c.n, c.noun); got != c.want {
+			t.Errorf("plural(%d, %q) = %q, want %q", c.n, c.noun, got, c.want)
+		}
+	}
+}
+
+func TestPasswordStatusIsNotRedacted(t *testing.T) {
+	// Redact masks "password=x" and "password: x". Account evidence must avoid
+	// those forms, or every status would show as ***.
+	line := "alice  uid=1000  shell=/bin/bash  password " + passwordLabel(ShadowEntry{Status: "locked"})
+	if got := model.Redact(line); got != line {
+		t.Errorf("status was masked: %q", got)
+	}
+}
 
 func TestParseNginxAdvisories(t *testing.T) {
 	got := parseNginxAdvisories(nginxPage)
@@ -164,7 +214,7 @@ func TestParseAuthorizedKey(t *testing.T) {
 			t.Errorf("should reject %q", bad)
 		}
 	}
-	if fingerprint("!!!") != "無效金鑰" {
+	if fingerprint("!!!") != "invalid key" {
 		t.Error("invalid base64 should not panic or produce a fingerprint")
 	}
 	// Matches ssh-keygen -lf for this well known test vector shape.

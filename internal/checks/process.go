@@ -72,7 +72,7 @@ func checkProcesses(c *Context) []model.Finding {
 	const cat = model.CatProcess
 	procs, err := c.Procs()
 	if err != nil {
-		return []model.Finding{skipped("process.suspicious", cat, "可疑程序", err.Error())}
+		return []model.Finding{skipped("process.suspicious", cat, "Suspicious processes", err.Error())}
 	}
 	byPID := map[int]*procinfo.Process{}
 	for _, p := range procs {
@@ -95,7 +95,7 @@ func checkProcesses(c *Context) []model.Finding {
 		user++
 		line := p.Label()
 		if cmd := p.CmdlineString(); cmd != "" {
-			line += "  指令：" + cmd
+			line += "  command: " + cmd
 		}
 		exeBase := base(p.Exe)
 
@@ -139,12 +139,12 @@ func checkProcesses(c *Context) []model.Finding {
 			s0, ok0 := estTCP[p.StdioSocket[0]]
 			_, ok1 := estTCP[p.StdioSocket[1]]
 			if ok0 && ok1 && (shellNames[exeBase] || interactiveNetTools[strings.TrimRight(exeBase, "0123456789.")]) {
-				revShell = append(revShell, line+"  連線："+s0.Remote())
+				revShell = append(revShell, line+"  connection: "+s0.Remote())
 			}
 		}
 		if shellNames[exeBase] || shellNames[p.Comm] {
 			if parent := byPID[p.PPID]; parent != nil && isWebParent(base(parent.Exe)) {
-				webShell = append(webShell, line+"  父程序："+parent.Label())
+				webShell = append(webShell, line+"  parent: "+parent.Label())
 			}
 		}
 		if v, ok := procinfo.Environ(p.PID, "LD_PRELOAD"); ok && strings.TrimSpace(v) != "" {
@@ -166,27 +166,27 @@ func checkProcesses(c *Context) []model.Finding {
 		f.Detail, f.Remediation, f.Evidence = detail, fix, ev
 		out = append(out, f)
 	}
-	isolate := "先保留 /proc/<pid>/exe 與連線資訊，再隔離主機調查。不要先把程序砍掉。"
-	add("fake_kernel", model.Critical, "使用者程序偽裝成 kernel thread", "它的名稱像 [kworker]，卻有實際的執行檔。真正的 kernel thread 沒有執行檔。", isolate, fakeKernel)
-	add("masquerade", model.Critical, "程序偽裝成系統服務", "argv[0] 寫的是系統服務名稱，實際執行檔卻是別的程式。BPFDoor 等後門會這樣隱藏自己。", isolate, masquerade)
-	add("reverse_shell", model.Critical, "疑似 Reverse shell", "標準輸入與輸出都接到 TCP 連線，這是 reverse shell 的典型特徵。", isolate, revShell)
-	add("miner", model.Critical, "發現挖礦程式特徵", "", isolate, miners)
-	add("temp_exe", model.Critical, "程序從暫存目錄執行", "正常服務不會從 /tmp、/var/tmp 或 /dev/shm 執行，這很常見於入侵後投放的工具。", isolate, tempExe)
-	add("memfd_exe", model.Critical, "程序從記憶體檔案執行", "執行檔只存在 memfd，磁碟上找不到，這是無檔案攻擊的手法。", isolate, memfd)
-	add("container_temp_exe", model.High, "容器內的程序從暫存目錄執行", "", "檢查該容器是否遭入侵，必要時從乾淨映像重建。", contTempExe)
-	add("web_shell_child", model.High, "Web 服務底下跑著 shell", "這可能是 webshell 正在執行指令；應用程式自己呼叫 shell 時也會如此。請對照指令內容判斷。", "檢查 Web 類別的掃描結果與存取紀錄。", webShell)
-	add("hidden_dir", model.Medium, "程序從隱藏目錄執行", "", "確認這些程式的來源。", hidden)
-	add("ld_preload", model.High, "程序帶有非套件的 LD_PRELOAD", "這會把外部函式庫注入程序，可用來隱藏檔案或竊取資料。", "確認該函式庫的來源。", preload)
-	add("unmanaged", model.Medium, "系統目錄內有非套件管理的程序在跑", "這些執行檔位於 /usr/bin、/usr/sbin 或 /usr/lib，卻不屬於任何套件。可能是手動安裝，也可能是被投放的。", "確認來源與安裝時間。", unmanaged)
-	add("deleted_exe", model.Medium, "程序的執行檔已被刪除或更新", "最常見的原因是套件升級後服務沒有重啟，這代表還在跑舊版本。若不是升級造成，就要懷疑惡意程式自刪。", "重啟服務以套用修補。若路徑不是套件檔案，請深入調查。", deletedExe)
+	isolate := "Preserve /proc/<pid>/exe and connection details, then isolate the host and investigate. Do not kill the process first."
+	add("fake_kernel", model.Critical, "User process poses as a kernel thread", "It is named like [kworker] but has a real binary. Real kernel threads have none.", isolate, fakeKernel)
+	add("masquerade", model.Critical, "Process poses as a system service", "argv[0] names a system service, but the real binary is something else. Backdoors such as BPFDoor hide this way.", isolate, masquerade)
+	add("reverse_shell", model.Critical, "Possible reverse shell", "Standard input and output are both attached to a TCP connection, the classic sign of a reverse shell.", isolate, revShell)
+	add("miner", model.Critical, "Crypto miner indicators found", "", isolate, miners)
+	add("temp_exe", model.Critical, "Process runs from a temp directory", "Normal services do not run from /tmp, /var/tmp or /dev/shm. Tools dropped after an intrusion often do.", isolate, tempExe)
+	add("memfd_exe", model.Critical, "Process runs from a memory file", "The binary exists only in a memfd and not on disk, a fileless attack technique.", isolate, memfd)
+	add("container_temp_exe", model.High, "Container process runs from a temp directory", "", "Check whether the container is compromised, and rebuild it from a clean image if needed.", contTempExe)
+	add("web_shell_child", model.High, "Shell running under a web service", "This may be a webshell running commands, though applications that call a shell look the same. Judge by the command.", "Review the Web category results and access logs.", webShell)
+	add("hidden_dir", model.Medium, "Process runs from a hidden directory", "", "Find out where these programs came from.", hidden)
+	add("ld_preload", model.High, "Process has an LD_PRELOAD from outside any package", "This injects an external library into the process, which can hide files or steal data.", "Find out where the library came from.", preload)
+	add("unmanaged", model.Medium, "Processes run from system directories but belong to no package", "These binaries are in /usr/bin, /usr/sbin or /usr/lib without belonging to a package. They may be manual installs, or they may have been dropped there.", "Check where they came from and when they were installed.", unmanaged)
+	add("deleted_exe", model.Medium, "Process binary was deleted or replaced", "Most often a service was not restarted after a package upgrade, so it still runs the old version. If no upgrade explains it, suspect malware that deleted itself.", "Restart the service to apply the fix. If the path is not a package file, investigate further.", deletedExe)
 
-	summary := finding("process.summary", cat, model.Info, fmt.Sprintf("共 %d 個程序（不含 kernel thread）", user))
+	summary := finding("process.summary", cat, model.Info, fmt.Sprintf("Processes, excluding kernel threads (%d)", user))
 	if !c.Host.IsRoot {
-		summary.Detail = "沒有 root 權限，看不到其他使用者程序的執行檔與 socket，結果不完整。"
+		summary.Detail = "Without root, binaries and sockets of other users' processes are hidden, so results are incomplete."
 	}
 	out = append(out, summary)
 	if len(fakeKernel)+len(masquerade)+len(tempExe)+len(memfd)+len(miners)+len(revShell) == 0 {
-		out = append(out, finding("process.clean", cat, model.OK, "沒有發現偽裝、暫存目錄執行或 reverse shell 特徵"))
+		out = append(out, finding("process.clean", cat, model.OK, "No signs of masquerading, temp directory execution or reverse shells"))
 	}
 	return out
 }
@@ -196,11 +196,11 @@ var soPathPattern = regexp.MustCompile(`(/\S*\.so(?:\.[0-9.]+)?)( \(deleted\))?$
 func checkStaleLibs(c *Context) []model.Finding {
 	const cat = model.CatProcess
 	if !c.Host.IsRoot {
-		return []model.Finding{needRoot("process.libs", cat, "已刪除的函式庫")}
+		return []model.Finding{needRoot("process.libs", cat, "Deleted libraries still in use")}
 	}
 	procs, err := c.Procs()
 	if err != nil {
-		return []model.Finding{skipped("process.libs", cat, "已刪除的函式庫", err.Error())}
+		return []model.Finding{skipped("process.libs", cat, "Deleted libraries still in use", err.Error())}
 	}
 	stale := map[string]map[string]bool{}
 	var tempLibs []string
@@ -226,11 +226,11 @@ func checkStaleLibs(c *Context) []model.Finding {
 			}
 			seen[m[1]] = true
 			if inTemp(m[1]) {
-				tempLibs = append(tempLibs, p.Label()+"  載入 "+m[1])
+				tempLibs = append(tempLibs, p.Label()+"  loaded "+m[1])
 				continue
 			}
 			if m[2] != "" {
-				key := p.Comm + "（pid " + strconv.Itoa(p.PID) + "）"
+				key := p.Comm + " (pid " + strconv.Itoa(p.PID) + ")"
 				if stale[key] == nil {
 					stale[key] = map[string]bool{}
 				}
@@ -240,13 +240,13 @@ func checkStaleLibs(c *Context) []model.Finding {
 	}
 	var out []model.Finding
 	if len(tempLibs) > 0 {
-		f := finding("process.temp_lib", cat, model.High, "程序載入暫存目錄內的函式庫")
-		f.Detail = "部分 Java 或 PyInstaller 程式會解壓 .so 到 /tmp，但這也是注入惡意函式庫的手法。請確認來源。"
+		f := finding("process.temp_lib", cat, model.High, "Processes load libraries from temp directories")
+		f.Detail = "Some Java or PyInstaller programs unpack .so files into /tmp, but this is also how malicious libraries get injected. Check the source."
 		f.Evidence = tempLibs
 		out = append(out, f)
 	}
 	if len(stale) == 0 {
-		return append(out, finding("process.libs", cat, model.OK, "沒有程序還在使用已被取代的函式庫"))
+		return append(out, finding("process.libs", cat, model.OK, "No processes use replaced libraries"))
 	}
 	var ev []string
 	for proc, libs := range stale {
@@ -255,13 +255,13 @@ func checkStaleLibs(c *Context) []model.Finding {
 			names = append(names, l)
 		}
 		sort.Strings(names)
-		ev = append(ev, proc+"："+strings.Join(names, ", "))
+		ev = append(ev, proc+": "+strings.Join(names, ", "))
 	}
 	sort.Strings(ev)
-	f := finding("process.libs", cat, model.Medium, fmt.Sprintf("%d 個程序還在使用已被更新的函式庫", len(stale)))
-	f.Detail = "例如 OpenSSL 已更新，但 nginx 沒有重啟，記憶體內仍是有漏洞的舊版。CVE 比對只看磁碟上的版本，這一項補上這個盲點。"
+	f := finding("process.libs", cat, model.Medium, fmt.Sprintf("Processes still using updated libraries (%d)", len(stale)))
+	f.Detail = "For example, OpenSSL was updated but nginx was not restarted, so the vulnerable old version is still in memory. The CVE check only sees versions on disk, and this covers that blind spot."
 	f.Evidence = ev
-	f.Remediation = "重啟列出的服務。"
+	f.Remediation = "Restart the listed services."
 	return append(out, f)
 }
 
@@ -272,7 +272,7 @@ func checkStaleLibs(c *Context) []model.Finding {
 func checkHiddenProcesses(c *Context) []model.Finding {
 	const cat = model.CatProcess
 	if !c.Host.IsRoot {
-		return []model.Finding{needRoot("process.hidden", cat, "隱藏程序")}
+		return []model.Finding{needRoot("process.hidden", cat, "Hidden processes")}
 	}
 	maxPID := 4194304
 	if v, err := strconv.Atoi(fsx.ProcString("/proc/sys/kernel/pid_max")); err == nil && v > 0 {
@@ -280,12 +280,12 @@ func checkHiddenProcesses(c *Context) []model.Finding {
 	}
 	listed, err := listPIDs()
 	if err != nil {
-		return []model.Finding{skipped("process.hidden", cat, "隱藏程序", err.Error())}
+		return []model.Finding{skipped("process.hidden", cat, "Hidden processes", err.Error())}
 	}
 	var candidates []int
 	for pid := 1; pid <= maxPID; pid++ {
 		if pid&0xffff == 0 && c.Ctx.Err() != nil {
-			return []model.Finding{skipped("process.hidden", cat, "隱藏程序", "時間不足，掃描未完成。")}
+			return []model.Finding{skipped("process.hidden", cat, "Hidden processes", "Ran out of time, so the scan did not finish.")}
 		}
 		if err := syscall.Kill(pid, 0); err == syscall.ESRCH {
 			continue
@@ -299,7 +299,7 @@ func checkHiddenProcesses(c *Context) []model.Finding {
 	time.Sleep(200 * time.Millisecond)
 	fresh, err := listPIDs()
 	if err != nil {
-		return []model.Finding{skipped("process.hidden", cat, "隱藏程序", err.Error())}
+		return []model.Finding{skipped("process.hidden", cat, "Hidden processes", err.Error())}
 	}
 	var hidden []string
 	for _, pid := range candidates {
@@ -311,22 +311,22 @@ func checkHiddenProcesses(c *Context) []model.Finding {
 		}
 		status, err := fsx.ReadProc("/proc/" + strconv.Itoa(pid) + "/status")
 		if err != nil {
-			hidden = append(hidden, fmt.Sprintf("pid=%d  /proc 內看不到，但 kill(pid,0) 顯示存在", pid))
+			hidden = append(hidden, fmt.Sprintf("pid=%d  not visible in /proc, but kill(pid,0) says it exists", pid))
 			continue
 		}
 		tgid, name := parseTgid(string(status))
 		if tgid != pid {
 			continue // an ordinary thread
 		}
-		hidden = append(hidden, fmt.Sprintf("pid=%d  %s  未出現在 /proc 目錄列表", pid, name))
+		hidden = append(hidden, fmt.Sprintf("pid=%d  %s  missing from the /proc directory listing", pid, name))
 	}
 	if len(hidden) == 0 {
-		return []model.Finding{finding("process.hidden", cat, model.OK, fmt.Sprintf("比對 %d 個 PID，沒有發現隱藏程序", maxPID))}
+		return []model.Finding{finding("process.hidden", cat, model.OK, fmt.Sprintf("No hidden processes across %d PIDs", maxPID))}
 	}
-	f := finding("process.hidden", cat, model.Critical, fmt.Sprintf("發現 %d 個隱藏程序", len(hidden)))
-	f.Detail = "這些程序存在於 kernel 中，卻從 /proc 目錄列表消失，這是 kernel rootkit 的典型行為。"
+	f := finding("process.hidden", cat, model.Critical, fmt.Sprintf("Hidden processes found (%d)", len(hidden)))
+	f.Detail = "These processes exist in the kernel but are missing from the /proc listing, typical behaviour of a kernel rootkit."
 	f.Evidence = hidden
-	f.Remediation = "這台主機的工具輸出已不可信。隔離主機，從乾淨媒體開機做離線鑑識。"
+	f.Remediation = "Output from tools on this host can no longer be trusted. Isolate it, boot from clean media and perform offline forensics."
 	return []model.Finding{f}
 }
 

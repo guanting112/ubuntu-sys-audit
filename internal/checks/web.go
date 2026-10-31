@@ -98,7 +98,7 @@ func collectInstances(c *Context, name string, isPkg func(string) bool, isProc f
 	if pkgs, err := c.Packages(); err == nil {
 		for _, p := range pkgs {
 			if isPkg(p.Name) {
-				out = append(out, webInstance{Name: p.Name, Version: p.Version, Origin: dpkg.Origin(p.Version), Where: "apt 套件"})
+				out = append(out, webInstance{Name: p.Name, Version: p.Version, Origin: dpkg.Origin(p.Version), Where: "apt package"})
 			}
 		}
 	}
@@ -128,10 +128,10 @@ func collectInstances(c *Context, name string, isPkg func(string) bool, isProc f
 			// lives in a container's filesystem or has been deleted.
 			v := readVersion("/proc/" + strconv.Itoa(p.PID) + "/exe")
 			origin := "compiled"
-			where := "執行中 pid " + strconv.Itoa(p.PID) + "，" + p.Exe
+			where := "running pid " + strconv.Itoa(p.PID) + ", " + p.Exe
 			if p.InContainer {
 				origin = "container"
-				where += "（容器內）"
+				where += " (in a container)"
 			}
 			out = append(out, webInstance{Name: name, Version: v, Origin: origin, Where: where})
 		}
@@ -153,17 +153,17 @@ func collectInstances(c *Context, name string, isPkg func(string) bool, isProc f
 func originLabel(o string) string {
 	switch o {
 	case "ubuntu":
-		return "Ubuntu 套件"
+		return "Ubuntu package"
 	case "ondrej-ppa":
 		return "ondrej PPA"
 	case "upstream-repo":
-		return "官方套件庫"
+		return "upstream repository"
 	case "third-party":
-		return "第三方套件"
+		return "third-party package"
 	case "compiled":
-		return "自行編譯"
+		return "self-compiled"
 	case "container":
-		return "容器"
+		return "container"
 	}
 	return o
 }
@@ -323,24 +323,24 @@ func checkNginx(c *Context) []model.Finding {
 		c.AddInventory(model.InventoryItem{Name: i.Name, Version: i.Version, Source: i.Origin})
 	}
 	if len(instances) == 0 {
-		return []model.Finding{finding("web.nginx", cat, model.OK, "沒有發現 nginx")}
+		return []model.Finding{finding("web.nginx", cat, model.OK, "nginx not found")}
 	}
 	var inv []string
 	var external []webInstance
 	for _, i := range instances {
 		ver := i.Version
 		if ver == "" {
-			ver = "版本不明"
+			ver = "version unknown"
 		}
 		inv = append(inv, fmt.Sprintf("%s  %s  [%s]  %s", i.Name, ver, originLabel(i.Origin), i.Where))
 		if i.Origin != "ubuntu" {
 			external = append(external, i)
 		}
 	}
-	summary := finding("web.nginx", cat, model.Info, fmt.Sprintf("發現 %d 份 nginx", len(instances)))
+	summary := finding("web.nginx", cat, model.Info, fmt.Sprintf("nginx copies found (%d)", len(instances)))
 	summary.Evidence = inv
 	summary.Focus = true
-	summary.Detail = "Ubuntu 套件的漏洞由 CVE 類別依 USN 判斷。其他來源（自行編譯、官方套件庫、容器）的版本則比對 nginx.org 的公告。"
+	summary.Detail = "Vulnerabilities in Ubuntu packages are judged by USN under the CVE category. Other sources (self-compiled, upstream repository, container) are compared against nginx.org advisories."
 	out = append(out, summary)
 
 	if len(external) > 0 {
@@ -352,9 +352,9 @@ func checkNginx(c *Context) []model.Finding {
 
 func nginxUpstreamFindings(c *Context, instances []webInstance) []model.Finding {
 	const cat = model.CatWeb
-	title := "nginx 官方公告比對"
+	title := "nginx advisory check"
 	if c.Opts.Offline {
-		return []model.Finding{skipped("web.nginx.upstream", cat, title, "離線模式，沒有比對 nginx.org 的公告。")}
+		return []model.Finding{skipped("web.nginx.upstream", cat, title, "Offline mode, so nginx.org advisories were not checked.")}
 	}
 	var page []byte
 	client := newHTTPClient(c.Opts.Proxy)
@@ -364,18 +364,18 @@ func nginxUpstreamFindings(c *Context, instances []webInstance) []model.Finding 
 		return err
 	})
 	if err != nil {
-		return []model.Finding{skipped("web.nginx.upstream", cat, title, "無法取得 nginx.org 公告："+err.Error())}
+		return []model.Finding{skipped("web.nginx.upstream", cat, title, "Cannot get nginx.org advisories: "+err.Error())}
 	}
 	advisories := parseNginxAdvisories(string(page))
 	if len(advisories) == 0 {
-		return []model.Finding{skipped("web.nginx.upstream", cat, title, "nginx.org 頁面格式無法解析，沒有比對。")}
+		return []model.Finding{skipped("web.nginx.upstream", cat, title, "Could not parse the nginx.org page, so nothing was compared.")}
 	}
 	var out []model.Finding
 	seen := map[string]bool{}
 	for _, inst := range instances {
 		ver := upstreamOf(inst.Version)
 		if inst.Version == "" || !versionRe.MatchString(ver) {
-			out = append(out, skipped("web.nginx.upstream", cat, inst.Name+"（"+inst.Where+"）", "無法從執行檔判斷版本。"))
+			out = append(out, skipped("web.nginx.upstream", cat, inst.Name+" ("+inst.Where+")", "Could not determine the version from the binary."))
 			continue
 		}
 		key := ver + "|" + inst.Origin
@@ -393,18 +393,18 @@ func nginxUpstreamFindings(c *Context, instances []webInstance) []model.Finding 
 			if sev < worst {
 				worst = sev
 			}
-			ev = append(ev, fmt.Sprintf("[%s] %s  %s  影響 %s，已修補 %s", a.Severity, a.Title, strings.Join(a.CVEs, " "), a.Vulnerable, a.NotVulnerable))
+			ev = append(ev, fmt.Sprintf("[%s] %s  %s  affects %s, fixed in %s", a.Severity, a.Title, strings.Join(a.CVEs, " "), a.Vulnerable, a.NotVulnerable))
 		}
-		label := fmt.Sprintf("nginx %s（%s）", ver, originLabel(inst.Origin))
+		label := fmt.Sprintf("nginx %s (%s)", ver, originLabel(inst.Origin))
 		if len(ev) == 0 {
-			out = append(out, finding("web.nginx.upstream", cat, model.OK, label+"不受 nginx.org 已公告的漏洞影響"))
+			out = append(out, finding("web.nginx.upstream", cat, model.OK, label+" is not affected by advisories published on nginx.org"))
 			continue
 		}
-		f := finding("web.nginx.upstream", cat, worst, fmt.Sprintf("%s受 %d 則 nginx.org 公告影響", label, len(ev)))
-		f.Detail = "判斷依據是版本範圍。許多 nginx 漏洞只在啟用特定模組時才可利用（例如 HTTP/3），但版本落在範圍內就應該升級。這個來源不會收到 Ubuntu 的 USN 修補。"
+		f := finding("web.nginx.upstream", cat, worst, fmt.Sprintf("%s is affected by %s", label, plural(len(ev), "nginx.org advisory")))
+		f.Detail = "This is based on version ranges. Many nginx vulnerabilities are exploitable only with specific modules enabled, such as HTTP/3, but a version in range should still be upgraded. This source gets no fixes through Ubuntu USNs."
 		f.Evidence = ev
 		f.Refs = []string{"https://nginx.org/en/security_advisories.html"}
-		f.Remediation = "升級到 nginx.org 公告的修補版本。"
+		f.Remediation = "Upgrade to a fixed version listed by nginx.org."
 		f.Focus = true
 		out = append(out, f)
 	}
@@ -436,26 +436,26 @@ func nginxConfigFindings(c *Context) []model.Finding {
 			// default security level refuses them regardless, so on those
 			// releases the line alone does not mean old TLS is reachable.
 			sev := model.Info
-			detail := "Ubuntu 預設的 nginx.conf 就是這樣寫。20.04 起 OpenSSL 的預設安全等級會拒絕這些協定，通常實際上連不上，但仍建議改掉。"
+			detail := "Ubuntu's stock nginx.conf lists these. From 20.04 on, OpenSSL's default security level refuses them, so connections usually fail anyway, but changing the setting is still recommended."
 			if c.Host.Codename == "bionic" {
 				sev = model.Medium
-				detail = "18.04 的 OpenSSL 仍接受這些協定，所以舊版 TLS 確實可以連線。"
+				detail = "OpenSSL on 18.04 still accepts these protocols, so old TLS connections do work."
 			}
-			f := finding("web.nginx.tls", cat, sev, "nginx 設定列出舊版 TLS："+strings.Join(uniqueStrings(cfg.WeakTLS), ", "))
+			f := finding("web.nginx.tls", cat, sev, "nginx configuration lists old TLS versions: "+strings.Join(uniqueStrings(cfg.WeakTLS), ", "))
 			f.Detail = detail
 			f.Evidence = []string{path}
-			f.Remediation = "設定 ssl_protocols TLSv1.2 TLSv1.3;"
+			f.Remediation = "Set ssl_protocols TLSv1.2 TLSv1.3;"
 			out = append(out, f)
 		}
 		if cfg.ServerTokens != "off" {
-			f := finding("web.nginx.tokens", cat, model.Info, "nginx 會在回應中顯示版本號")
-			f.Detail = "攻擊者掃描時能直接看到版本。這只是減少資訊外洩，不能取代修補。"
+			f := finding("web.nginx.tokens", cat, model.Info, "nginx shows its version in responses")
+			f.Detail = "Scanners can read the version directly. Hiding it only reduces information leaks and does not replace patching."
 			f.Evidence = []string{path}
-			f.Remediation = "在 http 區塊設定 server_tokens off;"
+			f.Remediation = "Set server_tokens off; in the http block."
 			out = append(out, f)
 		}
 		if cfg.Autoindex {
-			f := finding("web.nginx.autoindex", cat, model.Medium, "nginx 啟用了目錄列表（autoindex on）")
+			f := finding("web.nginx.autoindex", cat, model.Medium, "nginx has directory listing enabled (autoindex on)")
 			f.Evidence = []string{path}
 			out = append(out, f)
 		}
@@ -477,7 +477,7 @@ func checkPHP(c *Context) []model.Finding {
 		c.AddInventory(model.InventoryItem{Name: i.Name, Version: i.Version, Source: i.Origin})
 	}
 	if len(instances) == 0 {
-		return []model.Finding{finding("web.php", cat, model.OK, "沒有發現 PHP")}
+		return []model.Finding{finding("web.php", cat, model.OK, "PHP not found")}
 	}
 	var out []model.Finding
 	var inv []string
@@ -485,17 +485,17 @@ func checkPHP(c *Context) []model.Finding {
 	for _, i := range instances {
 		ver := i.Version
 		if ver == "" {
-			ver = "版本不明"
+			ver = "version unknown"
 		}
 		inv = append(inv, fmt.Sprintf("%s  %s  [%s]  %s", i.Name, ver, originLabel(i.Origin), i.Where))
 		if i.Origin != "ubuntu" {
 			external = append(external, i)
 		}
 	}
-	summary := finding("web.php", cat, model.Info, fmt.Sprintf("發現 %d 份 PHP", len(instances)))
+	summary := finding("web.php", cat, model.Info, fmt.Sprintf("PHP copies found (%d)", len(instances)))
 	summary.Evidence = inv
 	summary.Focus = true
-	summary.Detail = "Ubuntu 套件的漏洞由 CVE 類別依 USN 判斷。其他來源則比對 php.net 目前維護的版本。"
+	summary.Detail = "Vulnerabilities in Ubuntu packages are judged by USN under the CVE category. Other sources are compared against the versions php.net currently maintains."
 	out = append(out, summary)
 	if len(external) > 0 {
 		out = append(out, phpUpstreamFindings(c, external)...)
@@ -505,9 +505,9 @@ func checkPHP(c *Context) []model.Finding {
 
 func phpUpstreamFindings(c *Context, instances []webInstance) []model.Finding {
 	const cat = model.CatWeb
-	title := "PHP 官方版本比對"
+	title := "PHP version check"
 	if c.Opts.Offline {
-		return []model.Finding{skipped("web.php.upstream", cat, title, "離線模式，沒有比對 php.net。")}
+		return []model.Finding{skipped("web.php.upstream", cat, title, "Offline mode, so php.net was not checked.")}
 	}
 	var data []byte
 	client := newHTTPClient(c.Opts.Proxy)
@@ -517,11 +517,11 @@ func phpUpstreamFindings(c *Context, instances []webInstance) []model.Finding {
 		return err
 	})
 	if err != nil {
-		return []model.Finding{skipped("web.php.upstream", cat, title, "無法取得 php.net 資料："+err.Error())}
+		return []model.Finding{skipped("web.php.upstream", cat, title, "Cannot get php.net data: "+err.Error())}
 	}
 	active, err := parsePHPActive(data)
 	if err != nil {
-		return []model.Finding{skipped("web.php.upstream", cat, title, "php.net 回應無法解析："+err.Error())}
+		return []model.Finding{skipped("web.php.upstream", cat, title, "Could not parse the php.net response: "+err.Error())}
 	}
 	var branches []string
 	for b := range active {
@@ -533,7 +533,7 @@ func phpUpstreamFindings(c *Context, instances []webInstance) []model.Finding {
 	for _, inst := range instances {
 		ver := upstreamOf(inst.Version)
 		if inst.Version == "" || !versionRe.MatchString(ver) {
-			out = append(out, skipped("web.php.upstream", cat, inst.Name+"（"+inst.Where+"）", "無法從執行檔判斷版本。"))
+			out = append(out, skipped("web.php.upstream", cat, inst.Name+" ("+inst.Where+")", "Could not determine the version from the binary."))
 			continue
 		}
 		key := ver + "|" + inst.Origin
@@ -541,21 +541,21 @@ func phpUpstreamFindings(c *Context, instances []webInstance) []model.Finding {
 			continue
 		}
 		seen[key] = true
-		label := fmt.Sprintf("PHP %s（%s）", ver, originLabel(inst.Origin))
+		label := fmt.Sprintf("PHP %s (%s)", ver, originLabel(inst.Origin))
 		status, rel := assessPHP(ver, active)
 		switch status {
 		case "":
-			out = append(out, finding("web.php.upstream", cat, model.OK, label+"已是該分支最新版"))
+			out = append(out, finding("web.php.upstream", cat, model.OK, label+" is the latest on its branch"))
 		case "eol":
 			sev := model.High
-			detail := "這個分支已不在 php.net 的維護清單內（目前維護 " + strings.Join(branches, "、") + "），新的 PHP CVE 不會有官方修補。"
+			detail := "This branch is no longer maintained by php.net (currently maintained: " + strings.Join(branches, ", ") + "), so new PHP CVEs get no official fix."
 			if inst.Origin == "ondrej-ppa" {
 				sev = model.Medium
-				detail += " ondrej PPA 可能仍對舊分支提供 backport，版本號不一定代表未修補，但這不屬於官方支援。"
+				detail += " The ondrej PPA may still backport fixes to old branches, so the version alone does not prove it is unpatched, but this is not official support."
 			}
-			f := finding("web.php.upstream", cat, sev, label+"的分支已停止維護")
+			f := finding("web.php.upstream", cat, sev, label+" is on an unmaintained branch")
 			f.Detail = detail
-			f.Remediation = "升級到維護中的 PHP 分支。"
+			f.Remediation = "Upgrade to a maintained PHP branch."
 			f.Focus = true
 			out = append(out, f)
 		case "behind":
@@ -565,12 +565,12 @@ func phpUpstreamFindings(c *Context, instances []webInstance) []model.Finding {
 					sev = model.High
 				}
 			}
-			f := finding("web.php.upstream", cat, sev, label+"落後該分支最新版 "+rel.Version)
-			f.Detail = "這個來源不會收到 Ubuntu 的 USN 修補。"
+			f := finding("web.php.upstream", cat, sev, label+" is behind the latest on its branch, "+rel.Version)
+			f.Detail = "This source gets no fixes through Ubuntu USNs."
 			if sev == model.High {
-				f.Detail += "最新版標記為安全性更新。"
+				f.Detail += " The latest release is marked as a security update."
 			}
-			f.Remediation = "升級到 " + rel.Version + "。"
+			f.Remediation = "Upgrade to " + rel.Version + "."
 			f.Refs = []string{"https://www.php.net/ChangeLog-8.php"}
 			f.Focus = true
 			out = append(out, f)
@@ -630,26 +630,26 @@ func phpConfigFindings() []model.Finding {
 			}
 		}
 		if iniTrue(settings["allow_url_include"]) {
-			f := finding("web.php.url_include", cat, model.High, "PHP 啟用 allow_url_include："+ini)
-			f.Detail = "LFI 漏洞會因此直接變成遠端程式碼執行。"
-			f.Remediation = "設定 allow_url_include = Off"
+			f := finding("web.php.url_include", cat, model.High, "PHP has allow_url_include on: "+ini)
+			f.Detail = "This turns LFI bugs directly into remote code execution."
+			f.Remediation = "Set allow_url_include = Off"
 			out = append(out, f)
 		}
 		if iniTrue(settings["display_errors"]) {
-			f := finding("web.php.display_errors", cat, model.Medium, "PHP 啟用 display_errors："+ini)
-			f.Detail = "錯誤訊息可能洩漏路徑、SQL 與設定。"
-			f.Remediation = "設定 display_errors = Off"
+			f := finding("web.php.display_errors", cat, model.Medium, "PHP has display_errors on: "+ini)
+			f.Detail = "Error messages may leak paths, SQL and configuration."
+			f.Remediation = "Set display_errors = Off"
 			out = append(out, f)
 		}
 		if v, ok := settings["expose_php"]; !ok || iniTrue(v) {
-			f := finding("web.php.expose", cat, model.Info, "PHP 會在回應中顯示版本號："+ini)
-			f.Remediation = "設定 expose_php = Off"
+			f := finding("web.php.expose", cat, model.Info, "PHP shows its version in responses: "+ini)
+			f.Remediation = "Set expose_php = Off"
 			out = append(out, f)
 		}
 		if strings.TrimSpace(settings["disable_functions"]) == "" {
-			f := finding("web.php.disable_functions", cat, model.Info, "PHP 未限制危險函式："+ini)
-			f.Detail = "disable_functions 是空的，webshell 可以直接呼叫 system、exec 等函式。"
-			f.Remediation = "若應用程式不需要，就加入 disable_functions = exec,passthru,shell_exec,system,proc_open,popen"
+			f := finding("web.php.disable_functions", cat, model.Info, "PHP does not restrict dangerous functions: "+ini)
+			f.Detail = "disable_functions is empty, so a webshell can call system, exec and similar functions directly."
+			f.Remediation = "If your application does not need them, set disable_functions = exec,passthru,shell_exec,system,proc_open,popen"
 			out = append(out, f)
 		}
 	}
@@ -665,14 +665,14 @@ type shellRule struct {
 // Each rule targets behaviour that essentially never appears in application
 // code: directly executing request input, or layered decoding fed into eval.
 var shellRules = []shellRule{
-	{regexp.MustCompile(`(?i)\b(eval|assert|system|exec|shell_exec|passthru|popen|proc_open|pcntl_exec)\s*\(\s*@?\s*(?:(?:base64_decode|gzinflate|str_rot13|stripslashes)\s*\(\s*)*\$_(GET|POST|REQUEST|COOKIE|FILES|SERVER)\b`), model.Critical, "直接執行 HTTP 請求內容"},
-	{regexp.MustCompile(`(?i)\$_(GET|POST|REQUEST|COOKIE)\s*\[[^\]]{0,64}\]\s*\(`), model.Critical, "把 HTTP 參數當成函式呼叫"},
-	{regexp.MustCompile(`(?i)\b(c99shell|r57shell|wso\s*shell|FilesMan|b374k|IndoXploit|phpspy|weevely)\b`), model.Critical, "已知 webshell 名稱"},
-	{regexp.MustCompile(`e45e329feb5d925b`), model.Critical, "Behinder（冰蠍）預設金鑰"},
-	{regexp.MustCompile(`3c6e0b8a9c15224a`), model.Critical, "Godzilla（哥斯拉）預設金鑰"},
-	{regexp.MustCompile(`(?i)\beval\s*\(\s*(gzinflate|gzuncompress|gzdecode|str_rot13|base64_decode|strrev|rawurldecode|hex2bin)\s*\(`), model.High, "混淆程式碼交給 eval"},
-	{regexp.MustCompile(`(?i)\bpreg_replace\s*\(\s*['"].*?/[a-z]*e[a-z]*['"]\s*,`), model.High, "preg_replace /e 程式碼執行"},
-	{regexp.MustCompile(`(?i)\bcreate_function\s*\(.*\$_(GET|POST|REQUEST|COOKIE)`), model.High, "create_function 搭配請求內容"},
+	{regexp.MustCompile(`(?i)\b(eval|assert|system|exec|shell_exec|passthru|popen|proc_open|pcntl_exec)\s*\(\s*@?\s*(?:(?:base64_decode|gzinflate|str_rot13|stripslashes)\s*\(\s*)*\$_(GET|POST|REQUEST|COOKIE|FILES|SERVER)\b`), model.Critical, "executes HTTP request content directly"},
+	{regexp.MustCompile(`(?i)\$_(GET|POST|REQUEST|COOKIE)\s*\[[^\]]{0,64}\]\s*\(`), model.Critical, "calls an HTTP parameter as a function"},
+	{regexp.MustCompile(`(?i)\b(c99shell|r57shell|wso\s*shell|FilesMan|b374k|IndoXploit|phpspy|weevely)\b`), model.Critical, "known webshell name"},
+	{regexp.MustCompile(`e45e329feb5d925b`), model.Critical, "Behinder default key"},
+	{regexp.MustCompile(`3c6e0b8a9c15224a`), model.Critical, "Godzilla default key"},
+	{regexp.MustCompile(`(?i)\beval\s*\(\s*(gzinflate|gzuncompress|gzdecode|str_rot13|base64_decode|strrev|rawurldecode|hex2bin)\s*\(`), model.High, "obfuscated code passed to eval"},
+	{regexp.MustCompile(`(?i)\bpreg_replace\s*\(\s*['"].*?/[a-z]*e[a-z]*['"]\s*,`), model.High, "preg_replace /e code execution"},
+	{regexp.MustCompile(`(?i)\bcreate_function\s*\(.*\$_(GET|POST|REQUEST|COOKIE)`), model.High, "create_function with request content"},
 	{regexp.MustCompile(`(?i)\b(fsockopen|pfsockopen)\b.*(/bin/(ba)?sh)`), model.High, "PHP reverse shell"},
 }
 
@@ -747,7 +747,7 @@ func checkWebshells(c *Context) []model.Finding {
 	const cat = model.CatWeb
 	roots := webRoots(c)
 	if len(roots) == 0 {
-		return []model.Finding{finding("web.shell", cat, model.OK, "沒有發現網站根目錄")}
+		return []model.Finding{finding("web.shell", cat, model.OK, "No web roots found")}
 	}
 	var critical, high, uploads, double, recent []string
 	files := 0
@@ -791,7 +791,7 @@ func checkWebshells(c *Context) []model.Finding {
 				uploads = append(uploads, path)
 			}
 			if name == "eval-stdin.php" {
-				high = append(high, path+"（PHPUnit CVE-2017-9841，可遠端執行程式碼）")
+				high = append(high, path+" (PHPUnit CVE-2017-9841, allows remote code execution)")
 			}
 			if info.Size() > 4<<20 {
 				return nil
@@ -804,9 +804,9 @@ func checkWebshells(c *Context) []model.Finding {
 			switch {
 			case rule == "":
 			case sev == model.Critical:
-				critical = append(critical, path+"（"+rule+"）")
+				critical = append(critical, path+" ("+rule+")")
 			default:
-				high = append(high, path+"（"+rule+"）")
+				high = append(high, path+" ("+rule+")")
 			}
 			return nil
 		})
@@ -822,20 +822,20 @@ func checkWebshells(c *Context) []model.Finding {
 		f.Focus = sev <= model.High
 		out = append(out, f)
 	}
-	keep := "先備份檔案與存取紀錄當證據，再移除，並找出上傳途徑。"
-	add("critical", model.Critical, "%d 個 PHP 檔案符合 webshell 特徵", "這些特徵幾乎不會出現在正常程式碼中。", keep, critical)
-	add("high", model.High, "%d 個 PHP 檔案含可疑程式碼", "商業軟體的授權保護偶爾也會這樣寫，請逐一確認。", keep, high)
-	add("uploads", model.High, "上傳目錄內有 %d 個 PHP 檔案", "上傳目錄不該有可執行的 PHP，這是檔案上傳漏洞被利用後的典型痕跡。", "移除檔案，並在 nginx 禁止該目錄執行 PHP。", uploads)
-	add("double_ext", model.Medium, "%d 個雙副檔名檔案（如 x.php.jpg）", "這是繞過上傳檢查的常見手法。", "檢查內容。", double)
-	add("recent", model.Info, "最近 7 天內有 %d 個 PHP 檔案被修改", "如果最近沒有部署，這份清單就值得看一下。", "", recent)
+	keep := "Back up the file and access logs as evidence, remove it and find out how it was uploaded."
+	add("critical", model.Critical, "PHP files matching webshell signatures (%d)", "These patterns almost never appear in normal code.", keep, critical)
+	add("high", model.High, "PHP files with suspicious code (%d)", "License protection in commercial software occasionally looks like this, so check each one.", keep, high)
+	add("uploads", model.High, "PHP files in upload directories (%d)", "Upload directories should hold no executable PHP. This is a typical trace of an exploited file upload bug.", "Remove the files and block PHP execution in that directory in nginx.", uploads)
+	add("double_ext", model.Medium, "Files with double extensions such as x.php.jpg (%d)", "A common way to get past upload checks.", "Inspect the contents.", double)
+	add("recent", model.Info, "PHP files modified in the last 7 days (%d)", "If there was no recent deployment, this list is worth a look.", "", recent)
 	if len(critical)+len(high)+len(uploads) == 0 {
-		out = append(out, finding("web.shell", cat, model.OK, fmt.Sprintf("已掃描 %d 個 PHP 檔案，沒有 webshell 特徵", files)))
+		out = append(out, finding("web.shell", cat, model.OK, fmt.Sprintf("Scanned %d PHP files, no webshell signatures", files)))
 	}
 	if incomplete {
-		out = append(out, skipped("web.shell.partial", cat, "Webshell 掃描未完成", fmt.Sprintf("達到時間上限，只掃描了 %d 個檔案。", files)))
+		out = append(out, skipped("web.shell.partial", cat, "Webshell scan did not finish", fmt.Sprintf("Hit the time limit after %d files.", files)))
 	}
-	f := finding("web.shell.roots", cat, model.Info, "已掃描的網站根目錄")
+	f := finding("web.shell.roots", cat, model.Info, "Web roots scanned")
 	f.Evidence = roots
-	f.Detail = "特徵比對能抓到常見的 webshell，抓不到經過客製或混淆的版本。"
+	f.Detail = "Signature matching catches common webshells, not customized or obfuscated ones."
 	return append(out, f)
 }

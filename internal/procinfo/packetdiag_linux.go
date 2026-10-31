@@ -176,7 +176,7 @@ func BPFIndicators(prog []BPFInstruction) (magic []string, matchesDNS bool) {
 // DescribeBPF renders a short summary of a filter.
 func DescribeBPF(prog []BPFInstruction) string {
 	if len(prog) == 0 {
-		return "無過濾器"
+		return "no filter"
 	}
 	var ks []string
 	for _, in := range prog {
@@ -187,5 +187,5 @@ func DescribeBPF(prog []BPFInstruction) string {
 			break
 		}
 	}
-	return fmt.Sprintf("%d 條 BPF 指令，比對常數 %s", len(prog), strings.Join(ks, " "))
+	return fmt.Sprintf("%d BPF instructions, compares against %s", len(prog), strings.Join(ks, " "))
 }

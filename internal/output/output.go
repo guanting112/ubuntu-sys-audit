@@ -66,9 +66,9 @@ func DefaultFilename(r *model.Report) string {
 func Text(w io.Writer, r *model.Report, minSeverity model.Severity) {
 	h := r.Host
 	fmt.Fprintf(w, "ubuntu-sys-audit %s  %s\n", r.Version, r.ScannedAt.Local().Format(time.DateTime))
-	fmt.Fprintf(w, "主機 %s  %s %s  kernel %s  %s\n", h.Hostname, h.OSName, h.OSVersion, h.Kernel, h.Arch)
+	fmt.Fprintf(w, "Host %s  %s %s  kernel %s  %s\n", h.Hostname, h.OSName, h.OSVersion, h.Kernel, h.Arch)
 	if !h.IsRoot {
-		fmt.Fprintln(w, "注意：沒有以 root 執行，部分項目未檢查。")
+		fmt.Fprintln(w, "Warning: not running as root, so some items were not checked.")
 	}
 	fmt.Fprintln(w, Summary(r))
 	fmt.Fprintln(w)
@@ -84,10 +84,10 @@ func Text(w io.Writer, r *model.Report, minSeverity model.Severity) {
 			fmt.Fprintf(w, "    - %s\n", e)
 		}
 		if f.Remediation != "" {
-			fmt.Fprintf(w, "    處理：%s\n", f.Remediation)
+			fmt.Fprintf(w, "    Remediation: %s\n", f.Remediation)
 		}
 		for _, ref := range f.Refs {
-			fmt.Fprintf(w, "    參考：%s\n", ref)
+			fmt.Fprintf(w, "    Reference: %s\n", ref)
 		}
 		fmt.Fprintln(w)
 	}
@@ -96,6 +96,6 @@ func Text(w io.Writer, r *model.Report, minSeverity model.Severity) {
 // Summary returns a one line count of findings.
 func Summary(r *model.Report) string {
 	s := r.Summary
-	return fmt.Sprintf("嚴重 %d  高 %d  中 %d  資訊 %d  通過 %d  未檢查 %d  （耗時 %.1f 秒）",
+	return fmt.Sprintf("Critical %d  High %d  Medium %d  Info %d  Passed %d  Not checked %d  (%.1fs)",
 		s.Critical, s.High, s.Medium, s.Info, s.OK, s.Skipped, float64(r.DurationMS)/1000)
 }

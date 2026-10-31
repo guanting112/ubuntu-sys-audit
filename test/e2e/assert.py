@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Checks a scan report against what the end to end test expects."""
 import json
+import re
 import sys
 
 SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "info": 3, "ok": 4, "skipped": 5}
@@ -78,11 +79,24 @@ def check_planted(report, raw):
     return failures
 
 
+def check_text(raw):
+    """Report text must be English, with no broken format verbs from Sprintf."""
+    failures = []
+    han = re.search(r"[\u4e00-\u9fff]", raw)
+    if han:
+        start = max(han.start() - 40, 0)
+        failures.append("non English text in report: " + raw[start:han.end() + 20].replace("\n", " "))
+    if "%!" in raw:
+        failures.append("broken format verb in report")
+    return failures
+
+
 def main():
     mode, path = sys.argv[1], sys.argv[2]
     raw = load(path)
     report = json.loads(raw)
     failures = check_clean(report) if mode == "clean" else check_planted(report, raw)
+    failures += check_text(raw)
     failures += [f"check {c['id']} errored: {c['error']}" for c in report["checks"] if c.get("error")]
     summary = report["summary"]
     print(f"  {mode}: {summary} in {report['duration_ms']} ms")

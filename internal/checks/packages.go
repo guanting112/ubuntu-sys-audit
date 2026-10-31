@@ -19,7 +19,7 @@ func checkUpdates(c *Context) []model.Finding {
 	const cat = model.CatPackages
 	pkgs, err := c.Packages()
 	if err != nil {
-		return []model.Finding{skipped("packages.updates", cat, "安全更新", "無法讀取 dpkg 資料庫："+err.Error())}
+		return []model.Finding{skipped("packages.updates", cat, "Security updates", "Cannot read the dpkg database: "+err.Error())}
 	}
 	var out []model.Finding
 
@@ -32,10 +32,10 @@ func checkUpdates(c *Context) []model.Finding {
 		}
 	}
 	if len(held) > 0 {
-		f := finding("packages.held", cat, model.Medium, fmt.Sprintf("%d 個套件被鎖定（apt hold）", len(held)))
-		f.Detail = "被鎖定的套件不會收到更新，包含安全修補。"
+		f := finding("packages.held", cat, model.Medium, fmt.Sprintf("Packages on apt hold (%d)", len(held)))
+		f.Detail = "Held packages get no updates, including security fixes."
 		f.Evidence = held
-		f.Remediation = "確認原因，不再需要就 apt-mark unhold <套件>。"
+		f.Remediation = "Find out why. If no longer needed, run apt-mark unhold <package>."
 		out = append(out, f)
 	}
 
@@ -56,9 +56,9 @@ func checkUpdates(c *Context) []model.Finding {
 	}
 	switch {
 	case len(lists) == 0 && len(compressed) > 0:
-		out = append(out, skipped("packages.pending", cat, "可安裝的安全更新", "apt 清單是壓縮格式，工具未解析。CVE 類別的比對不受影響。"))
+		out = append(out, skipped("packages.pending", cat, "Available security updates", "The apt lists are compressed and this tool does not parse that format. The CVE check is not affected."))
 	case len(lists) == 0:
-		out = append(out, skipped("packages.pending", cat, "可安裝的安全更新", "找不到 apt 的 security 清單，請先執行 apt update。"))
+		out = append(out, skipped("packages.pending", cat, "Available security updates", "No apt security lists found. Run apt update first."))
 	default:
 		pending := map[string]string{}
 		for _, l := range lists {
@@ -77,19 +77,19 @@ func checkUpdates(c *Context) []model.Finding {
 		}
 		sort.Strings(ev)
 		if len(ev) > 0 {
-			f := finding("packages.pending", cat, model.High, fmt.Sprintf("%d 個安全更新尚未安裝", len(ev)))
-			f.Detail = "依本機 apt 清單（最後更新 " + newest.Format("2006-01-02") + "）判斷。"
+			f := finding("packages.pending", cat, model.High, fmt.Sprintf("Security updates not yet installed (%d)", len(ev)))
+			f.Detail = "Based on the local apt lists, last updated " + newest.Format("2006-01-02") + "."
 			f.Evidence = ev
 			f.Remediation = "sudo apt update && sudo apt upgrade"
 			f.Focus = true
 			out = append(out, f)
 		} else {
-			out = append(out, finding("packages.pending", cat, model.OK, "依本機 apt 清單，沒有待安裝的安全更新"))
+			out = append(out, finding("packages.pending", cat, model.OK, "No pending security updates according to the local apt lists"))
 		}
 	}
 	if !newest.IsZero() && time.Since(newest) > 7*24*time.Hour {
-		f := finding("packages.stale_lists", cat, model.Medium, fmt.Sprintf("apt 清單已 %d 天未更新", int(time.Since(newest).Hours()/24)))
-		f.Detail = "上次更新是 " + newest.Format("2006-01-02") + "。清單過舊時，上面的待更新數量會偏低。"
+		f := finding("packages.stale_lists", cat, model.Medium, fmt.Sprintf("apt lists not updated for %d days", int(time.Since(newest).Hours()/24)))
+		f.Detail = "Last updated " + newest.Format("2006-01-02") + ". With stale lists, the pending update count will be too low."
 		f.Remediation = "sudo apt update"
 		out = append(out, f)
 	}
@@ -101,20 +101,20 @@ func checkUpdates(c *Context) []model.Finding {
 	_, hasPkg := installed["unattended-upgrades"]
 	switch {
 	case !hasPkg:
-		f := finding("packages.unattended", cat, model.Medium, "未安裝 unattended-upgrades")
-		f.Detail = "主機不會自動套用安全更新。CVE 公開後，修補完全靠人工。"
+		f := finding("packages.unattended", cat, model.Medium, "unattended-upgrades is not installed")
+		f.Detail = "This host does not apply security updates automatically, so every CVE fix relies on manual work."
 		f.Remediation = "sudo apt install unattended-upgrades && sudo dpkg-reconfigure -plow unattended-upgrades"
 		out = append(out, f)
 	case !autoEnabled:
-		f := finding("packages.unattended", cat, model.Medium, "unattended-upgrades 已安裝但未啟用")
+		f := finding("packages.unattended", cat, model.Medium, "unattended-upgrades is installed but not enabled")
 		f.Remediation = "sudo dpkg-reconfigure -plow unattended-upgrades"
 		out = append(out, f)
 	default:
-		f := finding("packages.unattended", cat, model.OK, "已啟用自動安全更新")
+		f := finding("packages.unattended", cat, model.OK, "Automatic security updates are enabled")
 		if st, err := os.Stat("/var/lib/apt/periodic/unattended-upgrades-stamp"); err == nil && time.Since(st.ModTime()) > 7*24*time.Hour {
 			f.Severity = model.Medium
-			f.Title = fmt.Sprintf("自動安全更新已 %d 天沒有執行", int(time.Since(st.ModTime()).Hours()/24))
-			f.Remediation = "檢查 /var/log/unattended-upgrades/ 與 apt-daily-upgrade.timer。"
+			f.Title = fmt.Sprintf("Automatic security updates have not run for %d days", int(time.Since(st.ModTime()).Hours()/24))
+			f.Remediation = "Check /var/log/unattended-upgrades/ and apt-daily-upgrade.timer."
 		}
 		out = append(out, f)
 	}
@@ -129,7 +129,7 @@ func checkUpdates(c *Context) []model.Finding {
 			}
 		}
 		if last != "" {
-			f := finding("packages.last_upgrade", cat, model.Info, "最後一次套件升級："+strings.Join(strings.Fields(last + " x x")[:2], " "))
+			f := finding("packages.last_upgrade", cat, model.Info, "Last package upgrade: "+strings.Join(strings.Fields(last + " x x")[:2], " "))
 			f.Evidence = []string{last}
 			out = append(out, f)
 		}
@@ -196,15 +196,15 @@ func checkAptSources(c *Context) []model.Finding {
 		}
 	}
 	if len(hosts) == 0 {
-		return []model.Finding{finding("packages.sources", cat, model.OK, "只使用 Ubuntu 官方套件來源")}
+		return []model.Finding{finding("packages.sources", cat, model.OK, "Only official Ubuntu package sources are used")}
 	}
 	var ev []string
 	for h := range hosts {
 		ev = append(ev, h)
 	}
 	sort.Strings(ev)
-	f := finding("packages.sources", cat, model.Info, fmt.Sprintf("%d 個第三方套件來源", len(ev)))
-	f.Detail = "這些來源的套件以 root 安裝，USN 也不涵蓋它們。內部鏡像站同樣會列在這裡。"
+	f := finding("packages.sources", cat, model.Info, fmt.Sprintf("Third-party package sources (%d)", len(ev)))
+	f.Detail = "Packages from these sources install as root and are not covered by USNs. Internal mirrors appear here too."
 	f.Evidence = ev
 	return []model.Finding{f}
 }
@@ -215,7 +215,7 @@ func checkInventory(c *Context) []model.Finding {
 	const cat = model.CatPackages
 	pkgs, err := c.Packages()
 	if err != nil {
-		return []model.Finding{skipped("packages.inventory", cat, "重要軟體版本", err.Error())}
+		return []model.Finding{skipped("packages.inventory", cat, "Key software versions", err.Error())}
 	}
 	var ev []string
 	for _, p := range pkgs {
@@ -227,8 +227,8 @@ func checkInventory(c *Context) []model.Finding {
 		c.AddInventory(model.InventoryItem{Name: p.Name, Version: p.Version, Source: origin})
 	}
 	sort.Strings(ev)
-	f := finding("packages.inventory", cat, model.Info, fmt.Sprintf("重要軟體版本（共安裝 %d 個套件）", len(pkgs)))
-	f.Detail = "下次有新 CVE 時，可以用這份清單或 JSON 輸出快速比對。Ubuntu 套件的版本號可能已含 backport 修補，不能只看 upstream 版本。"
+	f := finding("packages.inventory", cat, model.Info, fmt.Sprintf("Key software versions (%d packages installed)", len(pkgs)))
+	f.Detail = "When a new CVE lands, use this list or the JSON output to compare quickly. Ubuntu package versions may already include backported fixes, so do not judge by the upstream version alone."
 	f.Evidence = ev
 	f.Focus = true
 	return []model.Finding{f}
