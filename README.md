@@ -4,6 +4,10 @@ English | [繁體中文](README.zh-TW.md)
 
 A read-only security audit tool for Ubuntu 18.04, 20.04, 22.04, 24.04 and 26.04. It ships as a single static binary: download it and run it with sudo. The target host needs no compiler and no extra packages.
 
+![ubuntu-sys-audit results view](docs/tui-results.png)
+
+![ubuntu-sys-audit scan in progress](docs/tui-scan.png)
+
 ## Usage
 
 ```sh

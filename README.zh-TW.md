@@ -6,6 +6,10 @@ Ubuntu 18.04、20.04、22.04、24.04、26.04 的唯讀安全檢測工具。單�
 
 工具的 TUI 與報告內容都是英文。
 
+![ubuntu-sys-audit results view](docs/tui-results.png)
+
+![ubuntu-sys-audit scan in progress](docs/tui-scan.png)
+
 ## 使用方式
 
 ```sh
