@@ -49,6 +49,7 @@ func All() []Check {
 		{"network.raw", "Raw and packet sockets (BPFDoor)", model.CatNetwork, quick, checkRawSockets},
 		{"network.iface", "Promiscuous interfaces", model.CatNetwork, quick, checkPromisc},
 		{"network.firewall", "Firewall status", model.CatNetwork, quick, checkFirewall},
+		{"network.mptcp", "Multipath TCP (MPTCP)", model.CatNetwork, quick, checkMPTCP},
 		{"network.docker", "Docker and containers", model.CatNetwork, quick, checkDocker},
 		{"process.suspicious", "Suspicious processes", model.CatProcess, quick, checkProcesses},
 		{"process.libs", "Deleted libraries still in use", model.CatProcess, quick, checkStaleLibs},

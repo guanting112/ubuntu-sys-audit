@@ -380,6 +380,42 @@ func TestPathIsProcessExe(t *testing.T) {
 	}
 }
 
+func TestMPTCPSockets(t *testing.T) {
+	protocols := `protocol  size sockets  memory press maxhdr  slab module     cl co di ac io in de sh ss gs se re sp bi br ha uh gp em
+TCP       2360     12       3   no     320   yes  kernel      y  y  y  y  y  y  y  y  y  y  y  y  y  n  y  y  y  y  y
+MPTCPv6   2048      2       0   no       0   yes  kernel      y  n  y  y  y  n  n  y  y  y  y  y  n  n  n  y  y  y  n
+MPTCP     1856      1       0   no       0   yes  kernel      y  n  y  y  y  n  n  y  y  y  y  y  n  n  n  y  y  y  n
+`
+	if got := mptcpSockets(protocols); got != 3 {
+		t.Errorf("want 3 sockets, got %d", got)
+	}
+	if got := mptcpSockets("protocol size sockets\nTCP 2360 12\n"); got != 0 {
+		t.Errorf("no MPTCP rows should count 0, got %d", got)
+	}
+}
+
+func TestMPTCPFinding(t *testing.T) {
+	for _, c := range []struct {
+		enabled string
+		sockets int
+		want    model.Severity
+		title   string
+	}{
+		{"", 0, model.OK, "not available"},
+		{"0", 0, model.OK, "disabled"},
+		{"1", 0, model.Medium, "recommend disabling"},
+		{"1", 3, model.Medium, "review before disabling"},
+	} {
+		f := mptcpFinding(c.enabled, c.sockets)
+		if f.Severity != c.want || !strings.Contains(f.Title, c.title) {
+			t.Errorf("enabled=%q sockets=%d: got %v %q", c.enabled, c.sockets, f.Severity, f.Title)
+		}
+		if c.want == model.Medium && !strings.Contains(f.Remediation, "net.mptcp.enabled=0") {
+			t.Errorf("enabled=%q: remediation must say how to disable it: %q", c.enabled, f.Remediation)
+		}
+	}
+}
+
 func TestWantVerifyCoversRustCoreutils(t *testing.T) {
 	for _, path := range []string{
 		"/usr/bin/ssh", "/usr/sbin/sshd", "/usr/lib/openssh/sshd-session",

@@ -452,6 +452,53 @@ func checkPromisc(c *Context) []model.Finding {
 	return []model.Finding{f}
 }
 
+// mptcpSockets sums the MPTCP rows of /proc/net/protocols. The third column is
+// the number of sockets in use in the reader's network namespace.
+func mptcpSockets(protocols string) int {
+	total := 0
+	for _, line := range strings.Split(protocols, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 || (f[0] != "MPTCP" && f[0] != "MPTCPv6") {
+			continue
+		}
+		if n, err := strconv.Atoi(f[2]); err == nil {
+			total += n
+		}
+	}
+	return total
+}
+
+// mptcpFinding recommends turning MPTCP off. Few servers use it, it is on by
+// default wherever the kernel supports it, and its code has had a steady run of
+// CVEs, so disabling it removes attack surface at little cost. enabled is the
+// sysctl value, empty when the kernel has no such setting.
+func mptcpFinding(enabled string, sockets int) model.Finding {
+	const id, cat = "network.mptcp", model.CatNetwork
+	switch enabled {
+	case "":
+		return finding(id, cat, model.OK, "MPTCP is not available on this kernel")
+	case "0":
+		return finding(id, cat, model.OK, "MPTCP is disabled")
+	}
+	f := finding(id, cat, model.Medium, "MPTCP is enabled, recommend disabling it")
+	f.Detail = "Multipath TCP is on by default on kernels that support it, but few servers need it. Its kernel code has had repeated CVEs, so turning it off reduces attack surface."
+	f.Evidence = []string{"net.mptcp.enabled = " + enabled, fmt.Sprintf("MPTCP sockets in use: %d", sockets)}
+	f.Remediation = "Run sudo sysctl -w net.mptcp.enabled=0 and add net.mptcp.enabled = 0 to /etc/sysctl.d/90-disable-mptcp.conf to keep it after a reboot. The setting is per network namespace, so containers keep their own value."
+	f.Refs = []string{"https://docs.kernel.org/networking/mptcp-sysctl.html"}
+	if sockets > 0 {
+		f.Title = "MPTCP is enabled and in use, review before disabling"
+		f.Detail += " Something on this host has MPTCP sockets open. Existing sockets keep working, but programs that create new ones without falling back to TCP will fail once it is off, so find out what uses it first (ss -M lists them)."
+	}
+	return f
+}
+
+func checkMPTCP(c *Context) []model.Finding {
+	return []model.Finding{mptcpFinding(
+		fsx.ProcString("/proc/sys/net/mptcp/enabled"),
+		mptcpSockets(fsx.ProcString("/proc/net/protocols")),
+	)}
+}
+
 func checkFirewall(c *Context) []model.Finding {
 	const cat = model.CatNetwork
 	ufw := "not installed"
