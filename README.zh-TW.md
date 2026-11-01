@@ -1,5 +1,13 @@
 # ubuntu-sys-audit
 
+[![build](https://github.com/guanting112/ubuntu-sys-audit/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/guanting112/ubuntu-sys-audit/actions/workflows/release.yml)
+[![release](https://img.shields.io/github/v/release/guanting112/ubuntu-sys-audit?sort=semver)](https://github.com/guanting112/ubuntu-sys-audit/releases/latest)
+[![license](https://img.shields.io/github/license/guanting112/ubuntu-sys-audit)](LICENSE)
+[![Go version](https://img.shields.io/github/go-mod/go-version/guanting112/ubuntu-sys-audit)](go.mod)
+[![build provenance: attested](https://img.shields.io/badge/provenance-attested-brightgreen?logo=github)](https://github.com/guanting112/ubuntu-sys-audit/attestations)
+[![Ubuntu 18.04 to 26.04](https://img.shields.io/badge/Ubuntu-18.04%20%7C%2020.04%20%7C%2022.04%20%7C%2024.04%20%7C%2026.04-E95420?logo=ubuntu&logoColor=white)](#使用方式)
+[![Linux amd64 and arm64](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-blue?logo=linux&logoColor=white)](#使用方式)
+
 [English](README.md) | 繁體中文
 
 Ubuntu 18.04、20.04、22.04、24.04、26.04 的唯讀安全檢測工具。單一靜態執行檔，下載後用 sudo 直接跑，目標主機不需要編譯器或任何套件。
@@ -174,3 +182,7 @@ make e2e     # 每個 Ubuntu 版本都開容器、植入假後門並驗證偵測
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
 ```
+
+## 授權
+
+[MIT](LICENSE)

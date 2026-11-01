@@ -1,5 +1,13 @@
 # ubuntu-sys-audit
 
+[![build](https://github.com/guanting112/ubuntu-sys-audit/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/guanting112/ubuntu-sys-audit/actions/workflows/release.yml)
+[![release](https://img.shields.io/github/v/release/guanting112/ubuntu-sys-audit?sort=semver)](https://github.com/guanting112/ubuntu-sys-audit/releases/latest)
+[![license](https://img.shields.io/github/license/guanting112/ubuntu-sys-audit)](LICENSE)
+[![Go version](https://img.shields.io/github/go-mod/go-version/guanting112/ubuntu-sys-audit)](go.mod)
+[![build provenance: attested](https://img.shields.io/badge/provenance-attested-brightgreen?logo=github)](https://github.com/guanting112/ubuntu-sys-audit/attestations)
+[![Ubuntu 18.04 to 26.04](https://img.shields.io/badge/Ubuntu-18.04%20%7C%2020.04%20%7C%2022.04%20%7C%2024.04%20%7C%2026.04-E95420?logo=ubuntu&logoColor=white)](#usage)
+[![Linux amd64 and arm64](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-blue?logo=linux&logoColor=white)](#usage)
+
 English | [繁體中文](README.zh-TW.md)
 
 A read-only security audit tool for Ubuntu 18.04, 20.04, 22.04, 24.04 and 26.04. It ships as a single static binary: download it and run it with sudo. The target host needs no compiler and no extra packages.
@@ -173,3 +181,7 @@ Push a tag starting with `v`, and GitHub Actions builds both architectures and c
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
 ```
+
+## License
+
+[MIT](LICENSE)
