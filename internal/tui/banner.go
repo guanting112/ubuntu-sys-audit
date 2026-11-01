@@ -35,21 +35,19 @@ func animTick() tea.Cmd {
 // All art is plain ASCII. Unicode box and block characters render at different
 // widths depending on the terminal and locale, which would break the alignment.
 //
-// {e} is the eyes and {l} the lens of the magnifying glass.
-const detective = `       ______
-     _|______|_
-       ({e})
-       (  ^  )
-        \ - /
-   .-----'-'-----.
-  /  /|       |\  \       .---.
- /  / |  [=]  | \  \_____/  {l}  \
-(__/  |       |  \______ \     /
-      |___|___|          '---'
-      |   |   |
-      |   |   |
-     _|   |   |_
-    (___|   |___)`
+// {e} is the eyes, {m} the mouth and {s} the text on the laptop screen.
+const hacker = `           _.-"""""-._
+         .'   _____   '.
+        /   .'     '.   \
+       |   /{e}\   |
+       |   |    {m}    |   |
+        \   '._____.'   /
+      .--'._         _.'--.
+     /      '-------'      \
+    /    ._____________.    \
+   /____ | {s} | ____\
+         |_____________|
+        /===============\`
 
 const titleSys = ` ___  __   __  ___
 / __| \ \ / / / __|
@@ -61,32 +59,48 @@ const titleAudit = `   _    _   _  ___   ___  _____
  / _ \ | |_| || |) | | |   | |
 /_/ \_\ \___/ |___/ |___|  |_|`
 
-// Every eye string is the same width, so the face does not jump between frames.
+// Each set of strings has one width, so the art does not jump between frames.
 var (
-	eyesCalm    = []string{"o   o", "o   o", "o   o", "-   -", "o   o", " o o ", "o o  ", " o o "}
-	eyesAlarmed = []string{"O   O", "O   O", "O   O", "-   -"}
-	lensCalm    = []string{"O", "o", ".", "o"}
-	lensAlarmed = []string{"!", "!", "?", "!"}
+	// The eyes rest in the middle, glance left and right, then blink.
+	eyesCalm = []string{
+		"  o   o  ", "  o   o  ", "  o   o  ",
+		" o   o   ", " o   o   ",
+		"  o   o  ", "  o   o  ",
+		"   o   o ", "   o   o ",
+		"  o   o  ", "  o   o  ",
+		"  -   -  ",
+	}
+	screenCalm    = []string{"$ scan_    ", "$ scan_    ", "$ scan     ", "$ scan     "}
+	screenAlarmed = []string{"! ALERT !  ", "! ALERT !  ", "! ALERT !  ", "           "}
 )
 
-// detectiveFrame returns the art for one animation frame. An alarmed detective
-// has found something serious.
-func detectiveFrame(frame int, alarmed bool) []string {
-	eyes, lens := eyesCalm, lensCalm
+const (
+	eyesAlarmed = "  O   O  "
+	mouthCalm   = "_"
+	mouthAlarm  = "o"
+)
+
+// hackerFrame returns the art for one animation frame. An alarmed hacker has found
+// something serious, and stops glancing around to stare at it.
+func hackerFrame(frame int, alarmed bool) []string {
+	eyes, mouth, screen := eyesCalm[frame%len(eyesCalm)], mouthCalm, screenCalm[frame%len(screenCalm)]
 	if alarmed {
-		eyes, lens = eyesAlarmed, lensAlarmed
+		eyes, mouth, screen = eyesAlarmed, mouthAlarm, screenAlarmed[frame%len(screenAlarmed)]
 	}
-	art := strings.ReplaceAll(detective, "{e}", eyes[frame%len(eyes)])
-	art = strings.ReplaceAll(art, "{l}", lens[frame%len(lens)])
+	art := strings.NewReplacer("{e}", eyes, "{m}", mouth, "{s}", screen).Replace(hacker)
 	return padded(strings.Split(art, "\n"))
 }
 
-// miniDetective is the small version for terminals with no room for the art.
-func miniDetective(frame int, alarmed bool) string {
+// miniHacker is the small version for terminals with no room for the art.
+func miniHacker(frame int, alarmed bool) string {
 	if alarmed {
-		return []string{"(O_O)-!", "(O_O)-!", "(O_O)-?", "(-_-)-!"}[frame%4]
+		return []string{"(O_O)!!", "(O_O)!!", "(O_O)! ", "(O_O)! "}[frame%4]
 	}
-	return []string{"(o_o)-O", "(o_o)-o", "(o_o)-.", "(-_-)-o"}[frame%4]
+	face := "(o_o)"
+	if frame%len(eyesCalm) == len(eyesCalm)-1 {
+		face = "(-_-)" // blinks with the large art
+	}
+	return face + []string{"$_", "$_", "$ ", "$ "}[frame%4]
 }
 
 // padded gives every line the same width, so joined blocks stay rectangular.
@@ -120,18 +134,18 @@ func (m *Model) alarmed() bool {
 	return m.live[model.Critical]+m.live[model.High] > 0
 }
 
-func (m *Model) detectiveArt() string {
+func (m *Model) hackerArt() string {
 	to := m.st.p.sev[model.Info]
 	if m.alarmed() {
 		to = m.st.p.sev[model.Critical]
 	}
-	return m.verticalGradient(detectiveFrame(m.frame, m.alarmed()), to)
+	return m.verticalGradient(hackerFrame(m.frame, m.alarmed()), to)
 }
 
 func (m *Model) viewSplash() string {
 	st := m.st
 	info := st.p.sev[model.Info]
-	person := m.detectiveArt()
+	person := m.hackerArt()
 	tagline := st.subtle.Render("Read-only security audit for Ubuntu")
 	if v := m.opts.Version; v != "" {
 		tagline += st.faint.Render("  " + v)
@@ -157,16 +171,16 @@ const (
 
 // scanArtFits reports whether the art has room beside the check list.
 func (m *Model) scanArtFits(avail int) bool {
-	lines := detectiveFrame(0, false)
+	lines := hackerFrame(0, false)
 	return m.width >= len(lines[0])+scanArtGap+scanMinList && avail >= len(lines)
 }
 
-// scanBody renders the check list, with the detective beside it when there is room.
+// scanBody renders the check list, with the hacker beside it when there is room.
 func (m *Model) scanBody(avail int) string {
 	if !m.scanArtFits(avail) {
 		return m.renderChecks(m.width, avail)
 	}
-	art := m.detectiveArt()
+	art := m.hackerArt()
 	list := m.renderChecks(m.width-lipgloss.Width(art)-scanArtGap, avail)
 	return lipgloss.JoinHorizontal(lipgloss.Top, art, strings.Repeat(" ", scanArtGap), list)
 }
@@ -202,7 +216,7 @@ func (m *Model) renderChecks(width, avail int) string {
 	return strings.Join(lines, "\n")
 }
 
-// progressSuffix follows the progress bar, with the small detective when the
+// progressSuffix follows the progress bar, with the small hacker when the
 // large one has no room.
 func (m *Model) progressSuffix(total, avail int) string {
 	s := m.st.subtle.Render(fmt.Sprintf("  %d/%d  %s", m.finished, total, m.elapsed.Round(time.Second)))
@@ -213,5 +227,5 @@ func (m *Model) progressSuffix(total, avail int) string {
 	if m.alarmed() {
 		style = m.st.sevStyle(model.Critical)
 	}
-	return s + "  " + style.Render(miniDetective(m.frame, m.alarmed()))
+	return s + "  " + style.Render(miniHacker(m.frame, m.alarmed()))
 }

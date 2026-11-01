@@ -193,7 +193,8 @@ func TestSelectedCategoryTabStaysVisibleOnNarrowTerminals(t *testing.T) {
 	}
 }
 
-const artFrames = 8 * 4
+// Long enough to cover every eye and screen state.
+const artFrames = 24
 
 func TestSplashFitsEveryTerminalSize(t *testing.T) {
 	for _, s := range sizes {
@@ -208,9 +209,9 @@ func TestSplashFitsEveryTerminalSize(t *testing.T) {
 
 func TestArtIsPlainAndKeepsItsShape(t *testing.T) {
 	for _, alarmed := range []bool{false, true} {
-		base := detectiveFrame(0, alarmed)
+		base := hackerFrame(0, alarmed)
 		for frame := range artFrames {
-			lines := detectiveFrame(frame, alarmed)
+			lines := hackerFrame(frame, alarmed)
 			if len(lines) != len(base) {
 				t.Fatalf("frame %d has %d lines, want %d", frame, len(lines), len(base))
 			}
@@ -249,7 +250,7 @@ func TestAnimationRunsThroughTheScanAndThenStops(t *testing.T) {
 	m.Update(splashDoneMsg{})
 	before := m.frame
 	if _, cmd := m.Update(animTickMsg{}); cmd == nil || m.frame == before {
-		t.Error("the detective should keep animating during the scan")
+		t.Error("the hacker should keep animating during the scan")
 	}
 	m.phase = phaseResults
 	if _, cmd := m.Update(animTickMsg{}); cmd != nil {
@@ -283,8 +284,68 @@ func TestSplashCanStillQuit(t *testing.T) {
 	}
 }
 
-func TestScanScreenShowsTheDetective(t *testing.T) {
-	const figure = "[=]"
+func TestHackerEyesMoveAndCursorBlinks(t *testing.T) {
+	faces := map[string]bool{}
+	screens := map[string]bool{}
+	for frame := range artFrames {
+		lines := hackerFrame(frame, false)
+		faces[strings.TrimSpace(lines[3])] = true
+		screens[strings.TrimSpace(lines[9])] = true
+	}
+	for _, want := range []string{
+		`|   /  o   o  \   |`, // middle
+		`|   / o   o   \   |`, // left
+		`|   /   o   o \   |`, // right
+		`|   /  -   -  \   |`, // blink
+	} {
+		if !faces[want] {
+			t.Errorf("no frame shows %q in %v", want, faces)
+		}
+	}
+	for _, want := range []string{`/____ | $ scan_     | ____\`, `/____ | $ scan      | ____\`} {
+		if !screens[want] {
+			t.Errorf("no frame shows %q in %v", want, screens)
+		}
+	}
+}
+
+func TestAlarmedHackerStaresAtTheAlert(t *testing.T) {
+	for frame := range artFrames {
+		lines := hackerFrame(frame, true)
+		if !strings.Contains(lines[3], `/  O   O  \`) {
+			t.Errorf("frame %d: eyes should stay wide open: %q", frame, lines[3])
+		}
+		if !strings.Contains(lines[4], "|    o    |") {
+			t.Errorf("frame %d: the mouth should change: %q", frame, lines[4])
+		}
+	}
+	if !strings.Contains(hackerFrame(0, true)[9], "! ALERT !") {
+		t.Error("the screen should show the alert")
+	}
+}
+
+func TestMiniHackerKeepsItsWidthAndBlinksRarely(t *testing.T) {
+	blinks := 0
+	for frame := range artFrames {
+		for _, alarmed := range []bool{false, true} {
+			if got := len(miniHacker(frame, alarmed)); got != len(miniHacker(0, alarmed)) {
+				t.Errorf("frame %d alarmed=%v changes width to %d", frame, alarmed, got)
+			}
+		}
+		if strings.Contains(miniHacker(frame, false), "-_-") {
+			blinks++
+		}
+		if strings.Contains(miniHacker(frame, true), "-_-") {
+			t.Errorf("frame %d: an alarmed hacker should not blink", frame)
+		}
+	}
+	if want := artFrames / len(eyesCalm); blinks != want {
+		t.Errorf("blinked %d times in %d frames, want %d", blinks, artFrames, want)
+	}
+}
+
+func TestScanScreenShowsTheHacker(t *testing.T) {
+	const figure = "._____."
 	for _, c := range []struct {
 		w, h    int
 		large   bool
@@ -303,7 +364,7 @@ func TestScanScreenShowsTheDetective(t *testing.T) {
 			t.Errorf("%dx%d: large art shown = %v, want %v", c.w, c.h, got, c.large)
 		}
 		if !c.large && !strings.Contains(view, "(o_o)") {
-			t.Errorf("%dx%d: a terminal with no room should show the small detective:\n%s", c.w, c.h, view)
+			t.Errorf("%dx%d: a terminal with no room should show the small hacker:\n%s", c.w, c.h, view)
 		}
 		// The first check sits in the left column, the last only in the right one.
 		last := m.rows[len(m.rows)-1].check.Name
@@ -314,7 +375,7 @@ func TestScanScreenShowsTheDetective(t *testing.T) {
 	}
 }
 
-func TestDetectiveReactsToSeriousFindings(t *testing.T) {
+func TestHackerReactsToSeriousFindings(t *testing.T) {
 	m := New(context.Background(), checks.Options{Version: "test"})
 	m.host.IsRoot = true
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -323,7 +384,7 @@ func TestDetectiveReactsToSeriousFindings(t *testing.T) {
 	}
 	m.applyEvent(checks.Event{Index: 0, Done: true, Findings: []model.Finding{{Severity: model.Medium, Title: "minor"}}})
 	if m.alarmed() {
-		t.Error("a medium finding should not alarm the detective")
+		t.Error("a medium finding should not alarm the hacker")
 	}
 	m.applyEvent(checks.Event{Index: 1, Done: true, Findings: []model.Finding{{Severity: model.Critical, Title: "bad"}}})
 	if !strings.Contains(ansi.Strip(m.viewScan()), "O   O") {
