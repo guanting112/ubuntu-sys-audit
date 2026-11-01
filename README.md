@@ -5,18 +5,37 @@
 [![license](https://img.shields.io/github/license/guanting112/ubuntu-sys-audit)](LICENSE)
 [![Go version](https://img.shields.io/github/go-mod/go-version/guanting112/ubuntu-sys-audit)](go.mod)
 [![build provenance: attested](https://img.shields.io/badge/provenance-attested-brightgreen?logo=github)](https://github.com/guanting112/ubuntu-sys-audit/attestations)
-[![Ubuntu 18.04 to 26.04](https://img.shields.io/badge/Ubuntu-18.04%20%7C%2020.04%20%7C%2022.04%20%7C%2024.04%20%7C%2026.04-E95420?logo=ubuntu&logoColor=white)](#usage)
-[![Linux amd64 and arm64](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-blue?logo=linux&logoColor=white)](#usage)
+[![Ubuntu 18.04 to 26.04](https://img.shields.io/badge/Ubuntu-18.04%20%7C%2020.04%20%7C%2022.04%20%7C%2024.04%20%7C%2026.04-E95420?logo=ubuntu&logoColor=white)](#quick-start)
+[![Linux amd64 and arm64](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-blue?logo=linux&logoColor=white)](#quick-start)
 
 English | [繁體中文](README.zh-TW.md)
 
-A read-only security audit tool for Ubuntu 18.04, 20.04, 22.04, 24.04 and 26.04. It ships as a single static binary: download it and run it with sudo. The target host needs no compiler and no extra packages.
+**A read-only security audit tool and CVE scanner for Ubuntu servers.**
 
-![ubuntu-sys-audit results view](docs/tui-results.png)
+`ubuntu-sys-audit` checks an Ubuntu 18.04, 20.04, 22.04, 24.04 or 26.04 host for missing CVE fixes, signs of compromise and risky configuration. It ships as a single static Go binary: download it, run it with sudo, and read the results in a terminal UI or as JSON. The host needs no agent, compiler or extra packages.
 
-![ubuntu-sys-audit scan in progress](docs/tui-scan.png)
+It helps answer questions like these, on one server or across a fleet:
 
-## Usage
+- Which hosts still lack the fix for a new nginx, PHP or Linux kernel CVE?
+- Does this host show signs of a backdoor, such as BPFDoor, a webshell, a reverse shell or a crypto miner?
+- Who has root, sudo or SSH key access, and what is set to run at startup?
+- Which hosts have pending security updates, need a reboot or run a release past its support date?
+
+![Terminal UI listing an Ubuntu host's security findings by severity](docs/tui-results.png)
+
+![Terminal UI scanning an Ubuntu host, with a live list of checks](docs/tui-scan.png)
+
+## Highlights
+
+- **CVE results that account for backports.** Packages and the running kernel are compared against Canonical's Ubuntu Security Notices (USN) OVAL data, including fixes available only through ESM. A patched `nginx 1.18.0` is not reported just because of its version number.
+- **Read-only.** It writes no files unless you ask and never executes a program from the host, so a replaced `ps` or `ss` cannot feed it false output.
+- **Nothing to install.** One static binary for amd64 or arm64, with no agent or daemon.
+- **Built for fleets.** Collect JSON reports over SSH and act on the exit code.
+- **Works without internet access.** Point it at a local copy of the OVAL file.
+- **Gentle on production.** It runs at low CPU and idle I/O priority and uses at most 2 CPUs.
+- **Verifiable releases.** GitHub Actions builds the binaries and publishes build provenance attestations.
+
+## Quick start
 
 Each release has two binaries. Run `dpkg --print-architecture` on the host to see which one it needs:
 
@@ -56,7 +75,7 @@ gh attestation verify ubuntu-sys-audit-linux-arm64 -R guanting112/ubuntu-sys-aud
 
 Other examples in this README use the amd64 name. On ARM hosts, use `ubuntu-sys-audit-linux-arm64` instead.
 
-### Scanning multiple hosts
+### Scan multiple Ubuntu servers over SSH
 
 The tool writes JSON automatically when there is no TTY, so you can collect reports over SSH:
 
@@ -126,6 +145,17 @@ The opening screen disappears on its own after a moment, or on any key. The scan
 | Packages | Pending security updates, stale apt lists, automatic updates, apt holds, third-party sources, versions of key software |
 | System | Release support dates and ESM, kernel version, pending reboots, kernel security parameters, CPU vulnerability mitigations |
 
+## How it compares
+
+`ubuntu-sys-audit` is a triage tool for Ubuntu hosts. It complements these widely used tools rather than replacing them:
+
+| Tool | Main focus |
+| --- | --- |
+| `ubuntu-sys-audit` | Ubuntu CVE status, signs of compromise and risky configuration in one read-only run |
+| Lynis | System hardening and compliance auditing on Linux and Unix |
+| rkhunter, chkrootkit | Rootkit detection |
+| Trivy | Vulnerabilities and misconfigurations in container images, filesystems and code repositories |
+
 ## Design principles
 
 **Read-only.** The tool writes no files unless you pass `-o` or press `s`. Although it runs as root, it never executes a program from the host. Versions are read from the contents of binaries instead of running `nginx -v`. `test/e2e/run.sh` verifies this with strace.
@@ -149,6 +179,7 @@ Known exception: when the tool reads BPF filters, the kernel may automatically l
 - **Webshell detection is signature based.** It catches common samples, not customized or obfuscated ones.
 - **Firewalls are reported by status only.** The tool does not run `iptables` or `nft` and cannot see cloud security groups, so "bound to a non-loopback address" does not necessarily mean reachable from outside.
 - **Livepatch is not taken into account.** Kernel results compare versions, so CVEs already fixed by Livepatch may still be listed.
+- **Detection is tested with planted samples.** `make e2e` plants fake backdoors in a container for each Ubuntu release. It does not exercise real rootkits.
 
 ## Hosts without internet access
 
@@ -161,6 +192,44 @@ sudo ./ubuntu-sys-audit-linux-amd64 --offline --oval-file com.ubuntu.jammy.usn.o
 ```
 
 The report warns you when the data is more than 14 days old.
+
+## FAQ
+
+### How do I check an Ubuntu server for missing CVE patches?
+
+Run the binary with sudo, as shown in [Quick start](#quick-start). It compares installed packages and the running kernel against Canonical's USN data, including fixes available only through ESM, and lists the matching notices.
+
+### How do I check whether nginx or PHP is vulnerable on Ubuntu?
+
+Comparing version numbers is not enough, because Ubuntu backports fixes: `nginx 1.18.0` may already be patched. Apt packages are compared against Canonical's OVAL data. Self-compiled, upstream repository and PPA builds are compared against data from nginx.org and php.net. The tool also reports common dangerous settings, webshell signatures and PHP files in upload directories.
+
+### Can it detect BPFDoor?
+
+It reads the BPF filters on packet sockets, the same data as `ss -0pb`, and reports a filter containing published BPFDoor magic values as critical. A variant with other values will not match that rule, but unpackaged programs that hold packet sockets and unknown processes that filter port 53 are still reported. Processes posing as kernel threads or system services are reported too.
+
+### Is it safe to run on a production server?
+
+The scan is read-only and runs at low CPU and idle I/O priority, using at most 2 CPUs. The one known side effect is that the kernel may load the `packet_diag` module, the same as running `ss -0`, and `--no-netlink` turns that off. On hosts with many files, limit the filesystem scan with `--fs-timeout` or skip it with `--skip-fs`.
+
+### Does it send information about my host anywhere?
+
+No. It only downloads public advisory data, using plain GET requests that send no information about the host. `--offline` stops it from using the network at all. [Design principles](#design-principles) lists every server it contacts.
+
+### Can it scan a server without internet access?
+
+Yes. Copy Canonical's OVAL file to the host and pass `--offline --oval-file`. See [Hosts without internet access](#hosts-without-internet-access).
+
+### Do I need root?
+
+Run it with sudo for full coverage. Without root it still runs, but items it cannot read are marked "Not checked" and the report warns you.
+
+### Does it work on Debian or other distributions?
+
+It is built and validated only for the Ubuntu releases listed above. On anything else, the report warns that the tool has not been validated there.
+
+### Does a clean result mean the host was not compromised?
+
+No. A rootkit that controls the kernel can falsify anything a local tool sees, and signature checks miss customized samples. If you suspect a compromise, boot from clean media and perform offline forensics. See [Limitations](#limitations).
 
 ## Development
 
