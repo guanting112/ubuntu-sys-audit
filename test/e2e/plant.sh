@@ -120,6 +120,13 @@ touch /tmp/AUDIT-EXECUTED-A-HOST-BINARY
 EOF
 chmod +x /usr/local/php8/bin/php
 
+# --- LXD: an old snap, and a privileged container. There is no real snap here,
+# only the files the audit reads, since snapd does not run in this container.
+mkdir -p /snap/lxd/current/meta
+printf 'name: lxd\nversion: 5.21.1-aaaaaaa\n' >/snap/lxd/current/meta/snap.yaml
+mkdir -p /var/snap/lxd/common/lxd/storage-pools/default/containers/priv1
+printf 'container:\n  config:\n    security.privileged: "true"\n' >/var/snap/lxd/common/lxd/storage-pools/default/containers/priv1/backup.yaml
+
 # --- processes
 # A symlink made by an attacker gives argv[0] a path that resolves to the running
 # binary. Unlike udevd's, this one belongs to no package and must still be caught.

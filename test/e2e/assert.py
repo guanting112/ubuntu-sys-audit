@@ -14,6 +14,8 @@ PLANTED = {
     "accounts.passwd_hash": "critical",
     "integrity.pam_rogue": "critical",
     "persistence.home_symlink": "high",
+    "cve.lxd.advisories": "high",
+    "network.lxd_privileged": "high",
     "accounts.sudo_system": "critical",
     "accounts.service_shell": "high",
     "accounts.history_wiped": "high",
@@ -120,6 +122,7 @@ def check_planted(report, raw):
     expect("web.shell.critical", "/data/www2/hidden.php", "a webshell behind a symlinked release was not found")
     expect("persistence.systemd_temp", "linked.service", "a unit linked from a temp directory was not found")
     expect("process.deleted_exe", "nginx", "the stale nginx test did not run")
+    expect("network.lxd_privileged", "priv1", "a privileged LXD container was not named")
     refuse("network.listener_bad_exe", "nginx", "a service awaiting restart was called malware")
     refuse("process.temp_exe", "/tmp/audit", "the tool flagged itself")
     refuse("filesystem.temp_elf", "/tmp/audit", "the tool flagged its own binary")

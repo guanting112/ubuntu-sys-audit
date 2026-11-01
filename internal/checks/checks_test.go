@@ -2,6 +2,8 @@ package checks
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -559,6 +561,140 @@ func TestFinishedCheckIsNotMarkedPartial(t *testing.T) {
 	found, errText := runOne(context.Background(), NewContext(context.Background(), Options{}), chk)
 	if len(found) != 1 || errText != "" {
 		t.Fatalf("got %+v err=%q", found, errText)
+	}
+}
+
+func TestLXDBranch(t *testing.T) {
+	for in, want := range map[string]string{
+		"4.0.15": "4.0", "5.0.11": "5.0", "5.21.9": "5.21", "6.10.1": "6", "6.9": "6", "3.0.4": "3.0", "5.20": "5.20", "10.1": "10.1",
+	} {
+		if got := lxdBranch(in); got != want {
+			t.Errorf("lxdBranch(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for in, want := range map[string]string{
+		"5.21.9-2313ff2": "5.21.9", "6.10.1-f5c750d": "6.10.1", "3.0.4": "3.0.4", "v6.23.0": "6.23.0", "garbage": "",
+	} {
+		if got := lxdVersionNumber(in); got != want {
+			t.Errorf("lxdVersionNumber(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// advisory builds an advisory shaped like the real GitHub API responses.
+func advisory(pkg, rng, patched string) lxdAdvisory {
+	var a lxdAdvisory
+	data := fmt.Sprintf(`{"ghsa_id":"GHSA-x","cve_id":"CVE-1","severity":"critical","summary":"s","vulnerabilities":[{"package":{"name":%q},"vulnerable_version_range":%q,"patched_versions":%q}]}`, pkg, rng, patched)
+	if err := json.Unmarshal([]byte(data), &a); err != nil {
+		panic(err)
+	}
+	return a
+}
+
+func TestLXDAdvisoryAffects(t *testing.T) {
+	const pkg = "lxd"
+	cases := []struct {
+		name    string
+		a       lxdAdvisory
+		version string
+		want    bool
+		fixedIn string
+	}{
+		{"older on its branch", advisory(pkg, ">= 4.0", "4.0.14, 5.0.10, 5.21.8, 6.9-bf243da, 6.10"), "5.21.7", true, "5.21.8"},
+		{"fixed on its branch", advisory(pkg, ">= 4.0", "4.0.14, 5.0.10, 5.21.8, 6.9-bf243da, 6.10"), "5.21.8", false, ""},
+		{"newer on its branch", advisory(pkg, ">= 4.0", "4.0.14, 5.0.10, 5.21.8, 6.9-bf243da, 6.10"), "5.21.9", false, ""},
+		{"lower 4.0 is compared to 4.0", advisory(pkg, ">= 4.0", "4.0.14, 5.0.10, 5.21.8"), "4.0.13", true, "4.0.14"},
+		{"rolling 6 branch behind", advisory(pkg, "<= 6.9", "4.0.13, 5.0.9, 5.21.7, 6.9-ab8fad2, 6.10"), "6.8", true, "6.9"},
+		{"rolling 6 branch current", advisory(pkg, ">= 4.0", "5.21.8, 6.9-bf243da, 6.10"), "6.10.1", false, ""},
+		{"supported branch not listed was not affected", advisory(pkg, "> 4.0", "5.0.10, 5.21.8, 6.9-bf243da, 6.10"), "4.0.15", false, ""},
+		{"supported branch not in a 6 only advisory", advisory(pkg, ">= 6.6", "6.9"), "5.21.1", false, ""},
+		{"operator in the patched list", advisory(pkg, ">= 4.0.0, <= 5.0.7", "4.0.12, >= 5.0.7"), "5.0.6", true, "5.0.7"},
+		{"unsupported branch inside the range", advisory(pkg, ">= 5.0", "5.0.8, 5.21.6, 6.10"), "5.20", true, ""},
+		{"unsupported branch below the range", advisory(pkg, ">= 4.0", "4.0.12, 5.0.8"), "3.0.4", false, ""},
+		{"Incus entry is not about LXD", advisory("github.com/lxc/incus/v6/cmd/incusd", "< v6.23.0", ">= v6.23.0"), "5.21.1", false, ""},
+		{"web UI entry is not about LXD", advisory("lxd-ui", ">= 0.1", "5.21.9"), "5.21.1", false, ""},
+		{"full module path counts", advisory("github.com/canonical/lxd", ">= 4.0", "5.21.8"), "5.21.1", true, "5.21.8"},
+		{"empty package name counts", advisory("", ">= 4.0", "5.21.8"), "5.21.1", true, "5.21.8"},
+	}
+	for _, c := range cases {
+		got, fixed := c.a.affects(c.version)
+		if got != c.want || fixed != c.fixedIn {
+			t.Errorf("%s: affects(%s) = %v %q, want %v %q", c.name, c.version, got, fixed, c.want, c.fixedIn)
+		}
+	}
+}
+
+func TestInLXDRange(t *testing.T) {
+	for _, c := range []struct {
+		rng, version string
+		want         bool
+	}{
+		{">= 4.0.2 < 6.9", "5.0.1", true},
+		{">= 4.0.2 < 6.9", "6.9", false},
+		{">= 4.0.0, <= 5.0.7", "5.0.7", true},
+		{"5.21.0", "5.21.0", true},
+		{"5.21.0", "5.21.1", false},
+		{"", "5.21.1", false},
+	} {
+		if got := inLXDRange(c.rng, c.version); got != c.want {
+			t.Errorf("inLXDRange(%q, %q) = %v", c.rng, c.version, got)
+		}
+	}
+}
+
+func TestSnapYAMLVersion(t *testing.T) {
+	yaml := "name: lxd\nbase: core22\nversion: 5.21.9-2313ff2\nsummary: LXD\ndescription: |-\n  version: 1.0 inside text\n"
+	if got := snapYAMLVersion(yaml); got != "5.21.9-2313ff2" {
+		t.Errorf("got %q", got)
+	}
+	if got := snapYAMLVersion("name: x\nversion: '6.10'\n"); got != "6.10" {
+		t.Errorf("quoted value: %q", got)
+	}
+	if got := snapYAMLVersion("name: x\n"); got != "" {
+		t.Errorf("no version: %q", got)
+	}
+}
+
+func TestParseSnapChannels(t *testing.T) {
+	data := []byte(`{"channel-map":[
+		{"channel":{"architecture":"amd64","risk":"stable","track":"5.21"},"version":"5.21.9-2313ff2"},
+		{"channel":{"architecture":"arm64","risk":"stable","track":"5.21"},"version":"5.21.8-aaaaaaa"},
+		{"channel":{"architecture":"amd64","risk":"edge","track":"5.21"},"version":"5.21.10-bbbbbbb"},
+		{"channel":{"architecture":"amd64","risk":"stable","track":"6"},"version":"6.10.1-f5c750d"}]}`)
+	got, err := parseSnapChannels(data, "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["5.21"] != "5.21.9-2313ff2" || got["6"] != "6.10.1-f5c750d" || len(got) != 2 {
+		t.Errorf("%v", got)
+	}
+}
+
+func TestLXDEscapes(t *testing.T) {
+	yaml := `container:
+  config:
+    image.os: ubuntu
+    security.privileged: "true"
+  devices:
+    root:
+      path: /
+      pool: default
+      type: disk
+    host:
+      path: /mnt/host
+      source: /
+      type: disk
+`
+	got := strings.Join(lxdEscapes(yaml), ",")
+	if got != "security.privileged,host root mounted" {
+		t.Errorf("got %q", got)
+	}
+	clean := "container:\n  config:\n    security.privileged: \"false\"\n    security.nesting: \"true\"\n  devices:\n    data:\n      path: /data\n      source: /srv/data\n      type: disk\n"
+	if got := lxdEscapes(clean); len(got) != 0 {
+		t.Errorf("an ordinary container was flagged: %v", got)
+	}
+	if got := lxdEscapes("config:\n  raw.lxc: lxc.apparmor.profile=unconfined\n"); len(got) != 1 || got[0] != "raw.lxc" {
+		t.Errorf("raw.lxc: %v", got)
 	}
 }
 

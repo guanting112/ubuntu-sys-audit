@@ -54,6 +54,11 @@ func newHTTPClient(proxy string) *http.Client {
 // fetch performs a GET and hands the response body to fn, retrying transient
 // failures. Downloads stay in memory; nothing is written to the host.
 func fetch(ctx context.Context, client *http.Client, target string, limit int64, fn func(io.Reader) error) error {
+	return fetchWithHeaders(ctx, client, target, nil, limit, fn)
+}
+
+// fetchWithHeaders is fetch for APIs that need request headers.
+func fetchWithHeaders(ctx context.Context, client *http.Client, target string, headers map[string]string, limit int64, fn func(io.Reader) error) error {
 	var last error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
@@ -68,6 +73,9 @@ func fetch(ctx context.Context, client *http.Client, target string, limit int64,
 			return err
 		}
 		req.Header.Set("User-Agent", userAgent)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			last = err
