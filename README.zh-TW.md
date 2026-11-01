@@ -12,6 +12,17 @@ Ubuntu 18.04、20.04、22.04、24.04、26.04 的唯讀安全檢測工具。單�
 
 ## 使用方式
 
+每個 Release 都有兩個執行檔。在主機上執行 `dpkg --print-architecture`，就知道該用哪一個：
+
+| 輸出 | 主機 | 執行檔 |
+|---|---|---|
+| `amd64` | x86-64 | `ubuntu-sys-audit-linux-amd64` |
+| `arm64` | 64 位元 ARM | `ubuntu-sys-audit-linux-arm64` |
+
+不支援其他架構，包括 32 位元的 `armhf`。
+
+amd64 主機：
+
 ```sh
 curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/ubuntu-sys-audit-linux-amd64
 curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/SHA256SUMS
@@ -20,13 +31,24 @@ chmod +x ubuntu-sys-audit-linux-amd64
 sudo ./ubuntu-sys-audit-linux-amd64
 ```
 
+arm64 主機：
+
+```sh
+curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/ubuntu-sys-audit-linux-arm64
+curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+chmod +x ubuntu-sys-audit-linux-arm64
+sudo ./ubuntu-sys-audit-linux-arm64
+```
+
 `SHA256SUMS` 和執行檔放在一起，只能抓出下載損毀。要確認執行檔確實由這個 repo 的 workflow 編譯（v0.1.3 之後的版本）：
 
 ```sh
-gh attestation verify ubuntu-sys-audit-linux-amd64 -R guanting112/ubuntu-sys-audit
+gh attestation verify ubuntu-sys-audit-linux-amd64 -R guanting112/ubuntu-sys-audit   # amd64
+gh attestation verify ubuntu-sys-audit-linux-arm64 -R guanting112/ubuntu-sys-audit   # arm64
 ```
 
-ARM 主機請把 `amd64` 換成 `arm64`。
+本文件其他範例用的是 amd64 的檔名，ARM 主機請改用 `ubuntu-sys-audit-linux-arm64`。
 
 ### 批次掃描多台主機
 
@@ -34,15 +56,17 @@ ARM 主機請把 `amd64` 換成 `arm64`。
 
 ```sh
 for h in web-01 web-02 db-01; do
-  ssh "$h" 'sudo ./ubuntu-sys-audit-linux-amd64' > "audit-$h.json"
+  ssh "$h" 'sudo "./ubuntu-sys-audit-linux-$(dpkg --print-architecture)"' > "audit-$h.json"
   echo "$h exit=$?"
 done
 ```
 
-上面的寫法需要主機上的 sudo 免密碼。如果 sudo 要輸入密碼，就要配置 TTY，並把報告存成檔案再取回，因為 TTY 會把 stdout 和密碼提示混在一起：
+`dpkg --print-architecture` 會在各台主機上執行，所以只要每台都放好對應的執行檔，amd64 和 arm64 主機可以一起掃。
+
+上面的迴圈需要主機上的 sudo 免密碼。如果 sudo 要輸入密碼，就要配置 TTY，並把報告存成檔案再取回，因為 TTY 會把 stdout 和密碼提示混在一起：
 
 ```sh
-ssh -t "$h" 'sudo ./ubuntu-sys-audit-linux-amd64 --json -o audit.json > /dev/null'
+ssh -t "$h" 'sudo "./ubuntu-sys-audit-linux-$(dpkg --print-architecture)" --json -o audit.json > /dev/null'
 scp "$h:audit.json" "audit-$h.json"
 ```
 

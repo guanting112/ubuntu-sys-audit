@@ -10,6 +10,17 @@ A read-only security audit tool for Ubuntu 18.04, 20.04, 22.04, 24.04 and 26.04.
 
 ## Usage
 
+Each release has two binaries. Run `dpkg --print-architecture` on the host to see which one it needs:
+
+| Output | Host | Binary |
+|---|---|---|
+| `amd64` | x86-64 | `ubuntu-sys-audit-linux-amd64` |
+| `arm64` | 64-bit ARM | `ubuntu-sys-audit-linux-arm64` |
+
+Other architectures, including 32-bit `armhf`, are not supported.
+
+On amd64:
+
 ```sh
 curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/ubuntu-sys-audit-linux-amd64
 curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/SHA256SUMS
@@ -18,13 +29,24 @@ chmod +x ubuntu-sys-audit-linux-amd64
 sudo ./ubuntu-sys-audit-linux-amd64
 ```
 
+On arm64:
+
+```sh
+curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/ubuntu-sys-audit-linux-arm64
+curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+chmod +x ubuntu-sys-audit-linux-arm64
+sudo ./ubuntu-sys-audit-linux-arm64
+```
+
 `SHA256SUMS` only catches a corrupted download, because it sits next to the binaries. To confirm a binary was built by this repository's workflow, for releases after v0.1.3:
 
 ```sh
-gh attestation verify ubuntu-sys-audit-linux-amd64 -R guanting112/ubuntu-sys-audit
+gh attestation verify ubuntu-sys-audit-linux-amd64 -R guanting112/ubuntu-sys-audit   # amd64
+gh attestation verify ubuntu-sys-audit-linux-arm64 -R guanting112/ubuntu-sys-audit   # arm64
 ```
 
-On ARM hosts, replace `amd64` with `arm64`.
+Other examples in this README use the amd64 name. On ARM hosts, use `ubuntu-sys-audit-linux-arm64` instead.
 
 ### Scanning multiple hosts
 
@@ -32,15 +54,17 @@ The tool writes JSON automatically when there is no TTY, so you can collect repo
 
 ```sh
 for h in web-01 web-02 db-01; do
-  ssh "$h" 'sudo ./ubuntu-sys-audit-linux-amd64' > "audit-$h.json"
+  ssh "$h" 'sudo "./ubuntu-sys-audit-linux-$(dpkg --print-architecture)"' > "audit-$h.json"
   echo "$h exit=$?"
 done
 ```
 
-This requires passwordless sudo on the host. If sudo asks for a password, allocate a TTY and save the report to a file, then fetch it. A TTY would otherwise mix the password prompt into stdout:
+`dpkg --print-architecture` runs on each host, so the loop works across amd64 and arm64 hosts as long as each one has its matching binary.
+
+The loop requires passwordless sudo on the host. If sudo asks for a password, allocate a TTY and save the report to a file, then fetch it. A TTY would otherwise mix the password prompt into stdout:
 
 ```sh
-ssh -t "$h" 'sudo ./ubuntu-sys-audit-linux-amd64 --json -o audit.json > /dev/null'
+ssh -t "$h" 'sudo "./ubuntu-sys-audit-linux-$(dpkg --print-architecture)" --json -o audit.json > /dev/null'
 scp "$h:audit.json" "audit-$h.json"
 ```
 

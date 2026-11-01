@@ -268,6 +268,16 @@ func checkCPUVulns(c *Context) []model.Finding {
 	}
 	f := finding("system.cpu", cat, model.Medium, fmt.Sprintf("Unmitigated CPU vulnerabilities (%d)", len(vuln)))
 	f.Evidence = vuln
-	f.Remediation = "Update intel-microcode or amd64-microcode and the kernel, and check whether the boot parameters include mitigations=off."
+	f.Remediation = cpuVulnRemediation(c.Host.Arch)
 	return []model.Finding{f}
+}
+
+// cpuVulnRemediation gives advice for the host's architecture. Ubuntu's microcode
+// packages exist only for x86. ARM CPUs get these fixes through firmware instead.
+func cpuVulnRemediation(arch string) string {
+	const bootParams = "check whether the boot parameters include mitigations=off."
+	if arch == "arm64" {
+		return "Update the kernel and the firmware from the board, server or cloud vendor, and " + bootParams
+	}
+	return "Update intel-microcode or amd64-microcode and the kernel, and " + bootParams
 }

@@ -655,6 +655,22 @@ func TestSnapYAMLVersion(t *testing.T) {
 	}
 }
 
+func TestCPUVulnRemediationMatchesArchitecture(t *testing.T) {
+	arm := cpuVulnRemediation("arm64")
+	if strings.Contains(arm, "microcode") || !strings.Contains(arm, "firmware") {
+		t.Errorf("arm64 should get firmware advice, not x86 microcode packages: %q", arm)
+	}
+	x86 := cpuVulnRemediation("amd64")
+	if !strings.Contains(x86, "intel-microcode") || !strings.Contains(x86, "amd64-microcode") {
+		t.Errorf("amd64 should name the microcode packages: %q", x86)
+	}
+	for _, got := range []string{arm, x86} {
+		if !strings.Contains(got, "mitigations=off") {
+			t.Errorf("should mention the boot parameter: %q", got)
+		}
+	}
+}
+
 func TestParseSnapChannels(t *testing.T) {
 	data := []byte(`{"channel-map":[
 		{"channel":{"architecture":"amd64","risk":"stable","track":"5.21"},"version":"5.21.9-2313ff2"},
