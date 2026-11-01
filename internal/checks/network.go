@@ -510,15 +510,7 @@ func checkMPTCP(c *Context) []model.Finding {
 
 func checkFirewall(c *Context) []model.Finding {
 	const cat = model.CatNetwork
-	ufw := "not installed"
-	if b, err := fsx.Read("/etc/ufw/ufw.conf", 1<<14); err == nil {
-		ufw = "disabled"
-		for _, line := range strings.Split(string(b), "\n") {
-			if strings.EqualFold(strings.TrimSpace(line), "ENABLED=yes") {
-				ufw = "enabled"
-			}
-		}
-	}
+	ufw := ufwStatus()
 	tables := strings.Fields(fsx.ProcString("/proc/net/ip_tables_names"))
 	nft := false
 	if st, err := os.Stat("/etc/nftables.conf"); err == nil && st.Size() > 0 {
@@ -530,8 +522,12 @@ func checkFirewall(c *Context) []model.Finding {
 		"Loaded iptables tables: " + strings.Join(tables, ", "),
 		fmt.Sprintf("/etc/nftables.conf exists: %v", nft),
 	}
-	f.Detail = "This tool does not run iptables or nft, so it reports status only. It does not evaluate rules and cannot see cloud security groups."
-	return []model.Finding{f}
+	f.Detail = "This tool does not run iptables or nft. It reads ufw's default policy and IPv6 setting, but does not evaluate rules and cannot see cloud security groups."
+	out := []model.Finding{f}
+	if ufw == "enabled" {
+		out = append(out, ufwFindings(c)...)
+	}
+	return out
 }
 
 type dockerConfig struct {
@@ -542,13 +538,17 @@ type dockerConfig struct {
 	State struct {
 		Running bool `json:"Running"`
 	} `json:"State"`
+	NetworkSettings struct {
+		Ports map[string][]dockerPortBinding `json:"Ports"`
+	} `json:"NetworkSettings"`
 }
 
 type dockerHostConfig struct {
-	Privileged  bool     `json:"Privileged"`
-	NetworkMode string   `json:"NetworkMode"`
-	PidMode     string   `json:"PidMode"`
-	Binds       []string `json:"Binds"`
+	Privileged   bool                           `json:"Privileged"`
+	NetworkMode  string                         `json:"NetworkMode"`
+	PidMode      string                         `json:"PidMode"`
+	Binds        []string                       `json:"Binds"`
+	PortBindings map[string][]dockerPortBinding `json:"PortBindings"`
 }
 
 func checkDocker(c *Context) []model.Finding {
@@ -568,7 +568,7 @@ func checkDocker(c *Context) []model.Finding {
 		}
 		return append(out, finding("docker.containers", cat, model.Info, "Docker is installed with no containers"))
 	}
-	var running, stopped, privileged []string
+	var running, stopped, privileged, published []string
 	for _, d := range dirs {
 		if c.Ctx.Err() != nil {
 			break
@@ -596,6 +596,12 @@ func checkDocker(c *Context) []model.Finding {
 		if json.Unmarshal(hb, &hc) != nil {
 			continue
 		}
+		// A container on the host network has no port rules to bypass ufw with.
+		if cfg.State.Running && hc.NetworkMode != "host" {
+			for _, port := range publishedPorts(cfg.NetworkSettings.Ports, hc.PortBindings) {
+				published = append(published, name+"  "+port)
+			}
+		}
 		var bad []string
 		if hc.Privileged {
 			bad = append(bad, "privileged")
@@ -621,6 +627,12 @@ func checkDocker(c *Context) []model.Finding {
 		g.Detail = "If one of these containers is compromised, so is the host."
 		g.Evidence = privileged
 		out = append(out, g)
+	}
+	if len(published) > 0 && ufwStatus() == "enabled" {
+		daemon, _ := fsx.Read("/etc/docker/daemon.json", 1<<20)
+		if dockerManagesIptables(daemon) {
+			out = append(out, dockerUfwFinding(published, dockerUserConfigured()))
+		}
 	}
 	return out
 }

@@ -135,7 +135,7 @@ The opening screen disappears on its own after a moment, or on any key. The scan
 | --- | --- |
 | CVE | Installed packages and the running kernel against Ubuntu Security Notices (USN), including fixes available only through ESM. The LXD snap, which USN does not cover, against Canonical's LXD advisories |
 | Web | nginx and PHP versions and origin; non-Ubuntu builds against nginx.org and php.net; common dangerous settings; webshell signatures; PHP files in upload directories |
-| Network | Port 53 listeners and their owners, traffic to DNS servers the system is not configured to use, all listening ports, packet and raw sockets, BPFDoor magic values, promiscuous mode, MPTCP enabled (recommends disabling it), Docker, LXD API exposure and privileged LXD containers |
+| Network | Port 53 listeners and their owners, traffic to DNS servers the system is not configured to use, all listening ports, packet and raw sockets, BPFDoor magic values, promiscuous mode, MPTCP enabled (recommends disabling it), rarely used protocols (DCCP, SCTP, RDS, TIPC), ufw's default policy and IPv6 gaps, Docker and container ports that bypass ufw, LXD API exposure and privileged LXD containers |
 | Processes | Processes posing as kernel threads or system services, execution from temporary directories or memory, reverse shells, shells under web services, crypto miners, LD_PRELOAD, hidden processes, libraries replaced on disk but still in use |
 | Integrity | System binaries against dpkg hashes, `ld.so.preload`, hidden kernel modules, unsigned modules, PAM modules and configuration, `core_pattern`, the `modprobe` path |
 | Persistence | cron, at, rc.local, init.d, profile, motd, apt hooks, udev, systemd services, login scripts in home directories |
@@ -143,7 +143,7 @@ The opening screen disappears on its own after a moment, or on any key. The scan
 | SSH | Effective `sshd_config` settings, authorized keys with fingerprints, keys on system accounts, host key permissions |
 | Filesystem | SUID and SGID files, capabilities, executables in temporary directories, regular files in `/dev`, world-writable system files, system binaries not managed by a package |
 | Packages | Pending security updates, stale apt lists, automatic updates, apt holds, third-party sources, versions of key software |
-| System | Release support dates and ESM, kernel version, pending reboots, kernel security parameters, CPU vulnerability mitigations |
+| System | Release support dates and ESM, kernel version, pending reboots, kernel security parameters, unprivileged user namespaces, CPU vulnerability mitigations |
 
 ## How it compares
 
@@ -177,7 +177,7 @@ Known exception: when the tool reads BPF filters, the kernel may automatically l
 - **USN data covers only vulnerabilities Ubuntu has already fixed, and only apt packages.** Unpatched CVEs and packages from snap, pip, npm or container images are out of scope.
 - **Hash checks trust the local dpkg database.** An attacker who also modifies the database will not be detected by this check.
 - **Webshell detection is signature based.** It catches common samples, not customized or obfuscated ones.
-- **Firewalls are reported by status only.** The tool does not run `iptables` or `nft` and cannot see cloud security groups, so "bound to a non-loopback address" does not necessarily mean reachable from outside.
+- **Firewall rules are not evaluated.** The tool reads ufw's default policy and IPv6 setting, but does not run `iptables` or `nft` and cannot see cloud security groups, so "bound to a non-loopback address" does not necessarily mean reachable from outside.
 - **Livepatch is not taken into account.** Kernel results compare versions, so CVEs already fixed by Livepatch may still be listed.
 - **Detection is tested with planted samples.** `make e2e` plants fake backdoors in a container for each Ubuntu release. It does not exercise real rootkits.
 

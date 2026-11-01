@@ -135,7 +135,7 @@ scp "$h:audit.json" "audit-$h.json"
 | --- | --- |
 | CVE | 已安裝套件與執行中 kernel 比對 Ubuntu USN，包含只有 ESM 才有的修補；USN 涵蓋不到的 LXD snap 則比對 Canonical 的 LXD 公告 |
 | Web | nginx、PHP 的版本與來源；非 Ubuntu 套件比對 nginx.org 與 php.net；常見危險設定；webshell 特徵；上傳目錄內的 PHP |
-| 網路 | 53 Port 監聽與擁有者、連到非系統 DNS 的流量、所有監聽 Port、Packet 與 Raw socket、BPFDoor 特徵值、混雜模式、MPTCP 是否啟用（建議關閉）、Docker、LXD API 是否對外與特權容器 |
+| 網路 | 53 Port 監聽與擁有者、連到非系統 DNS 的流量、所有監聽 Port、Packet 與 Raw socket、BPFDoor 特徵值、混雜模式、MPTCP 是否啟用（建議關閉）、少用的網路協定（DCCP、SCTP、RDS、TIPC）、ufw 預設策略與 IPv6 缺口、Docker 與繞過 ufw 的容器 Port、LXD API 是否對外與特權容器 |
 | 程序 | 偽裝成 kernel thread 或系統服務、從暫存目錄或記憶體執行、reverse shell、Web 服務底下的 shell、挖礦程式、LD_PRELOAD、隱藏程序、已被更新但仍在使用的函式庫 |
 | 完整性 | 系統執行檔與 dpkg 雜湊比對、`ld.so.preload`、隱藏的 kernel 模組、未簽章模組、PAM 模組與設定、`core_pattern`、`modprobe` 路徑 |
 | 持久化 | cron、at、rc.local、init.d、profile、motd、apt hook、udev、systemd 服務、家目錄登入腳本 |
@@ -143,7 +143,7 @@ scp "$h:audit.json" "audit-$h.json"
 | SSH | `sshd_config` 有效設定、授權金鑰清單與指紋、系統帳號的金鑰、host key 權限 |
 | 檔案 | SUID／SGID、Capabilities、暫存目錄的執行檔、`/dev` 內的一般檔案、任何人可寫的系統檔、非套件管理的系統執行檔 |
 | 套件 | 待安裝的安全更新、apt 清單是否過舊、自動更新、apt hold、第三方來源、重要軟體版本 |
-| 系統 | 版本支援期限與 ESM、kernel 版本、是否需要重開機、kernel 安全參數、CPU 漏洞緩解 |
+| 系統 | 版本支援期限與 ESM、kernel 版本、是否需要重開機、kernel 安全參數、非特權 user namespace、CPU 漏洞緩解 |
 
 ## 和其他工具的差異
 
@@ -177,7 +177,7 @@ scp "$h:audit.json" "audit-$h.json"
 - **USN 只涵蓋 Ubuntu 已發布修補的漏洞與 apt 套件。** 還沒有修補的 CVE、snap、pip、npm、容器映像內的套件都不在比對範圍內。
 - **雜湊比對的基準是本機 dpkg 資料庫。** 攻擊者若連資料庫一起改，這項就驗不出來。
 - **webshell 檢查是特徵比對。** 能抓到常見樣本，抓不到客製或混淆過的版本。
-- **防火牆只回報狀態。** 工具不會執行 `iptables` 或 `nft`，也看不到雲端安全群組，所以「綁定在非 loopback」不等於真的對外開放。
+- **不會判斷防火牆規則。** 工具會讀 ufw 的預設策略與 IPv6 設定，但不會執行 `iptables` 或 `nft`，也看不到雲端安全群組，所以「綁定在非 loopback」不等於真的對外開放。
 - **Livepatch 不會納入判斷。** kernel 項目比對的是版本，已由 Livepatch 修補的 CVE 仍可能列出。
 - **偵測是用植入的樣本測試的。** `make e2e` 會在每個 Ubuntu 版本的容器裡植入假後門，沒有用真實的 rootkit 測試。
 

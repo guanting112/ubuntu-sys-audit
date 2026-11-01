@@ -247,7 +247,7 @@ func checkSysctl(c *Context) []model.Finding {
 		f.Evidence = []string{mp}
 		out = append(out, f)
 	}
-	return out
+	return append(out, usernsFinding(readUsernsSettings(), c.Host.InContainer))
 }
 
 func checkCPUVulns(c *Context) []model.Finding {

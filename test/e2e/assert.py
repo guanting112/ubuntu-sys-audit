@@ -16,6 +16,9 @@ PLANTED = {
     "persistence.home_symlink": "high",
     "cve.lxd.advisories": "high",
     "network.lxd_privileged": "high",
+    "network.ufw_policy": "medium",
+    "network.ufw_ipv6": "medium",
+    "docker.ufw_bypass": "medium",
     "accounts.sudo_system": "critical",
     "accounts.service_shell": "high",
     "accounts.history_wiped": "high",
@@ -123,6 +126,15 @@ def check_planted(report, raw):
     expect("persistence.systemd_temp", "linked.service", "a unit linked from a temp directory was not found")
     expect("process.deleted_exe", "nginx", "the stale nginx test did not run")
     expect("network.lxd_privileged", "priv1", "a privileged LXD container was not named")
+    expect("network.ufw_ipv6", "2001:db8::1 on eth0", "the public IPv6 address was not named")
+    expect("network.ufw_ipv6", "[::]:", "a service listening on IPv6 was not named")
+    expect("docker.ufw_bypass", "web1  0.0.0.0:6379 -> 6379/tcp", "a published port was not named")
+    refuse("docker.ufw_bypass", "127.0.0.1", "a port published on loopback was reported")
+    refuse("docker.ufw_bypass", "stopped1", "a stopped container was reported")
+    refuse("docker.ufw_bypass", "hostnet1", "a container on the host network was reported")
+    expect("network.protocols", "rds", "a loadable protocol was not reported")
+    expect("network.protocols", "sctp", "a blacklist in a file modprobe ignores was accepted")
+    refuse("network.protocols", "tipc", "a blocked protocol was reported")
     refuse("network.listener_bad_exe", "nginx", "a service awaiting restart was called malware")
     refuse("process.temp_exe", "/tmp/audit", "the tool flagged itself")
     refuse("filesystem.temp_elf", "/tmp/audit", "the tool flagged its own binary")

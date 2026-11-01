@@ -127,6 +127,33 @@ printf 'name: lxd\nversion: 5.21.1-aaaaaaa\n' >/snap/lxd/current/meta/snap.yaml
 mkdir -p /var/snap/lxd/common/lxd/storage-pools/default/containers/priv1
 printf 'container:\n  config:\n    security.privileged: "true"\n' >/var/snap/lxd/common/lxd/storage-pools/default/containers/priv1/backup.yaml
 
+# --- firewall: ufw looks enabled, but lets everything in and ignores IPv6, and a
+# container publishes a port around it. Only the files the audit reads exist here.
+mkdir -p /etc/ufw /etc/default
+echo 'ENABLED=yes' >/etc/ufw/ufw.conf
+printf 'DEFAULT_INPUT_POLICY="ACCEPT"\nIPV6=no\n' >/etc/default/ufw
+sysctl -qw net.ipv6.conf.all.disable_ipv6=0 net.ipv6.conf.eth0.disable_ipv6=0 2>/dev/null
+ip -6 addr add 2001:db8::1/64 dev eth0 2>/dev/null
+for c in web1 stopped1 hostnet1; do mkdir -p "/var/lib/docker/containers/$c"; done
+cat >/var/lib/docker/containers/web1/config.v2.json <<'EOF'
+{"Name":"/web1","Config":{"Image":"redis:7"},"State":{"Running":true},
+ "NetworkSettings":{"Ports":{"6379/tcp":[{"HostIp":"0.0.0.0","HostPort":"6379"}],"8080/tcp":[{"HostIp":"127.0.0.1","HostPort":"8080"}],"9000/tcp":null}}}
+EOF
+echo '{"NetworkMode":"bridge"}' >/var/lib/docker/containers/web1/hostconfig.json
+# Neither of these has a port rule in effect, so neither may be reported.
+echo '{"Name":"/stopped1","Config":{"Image":"x"},"State":{"Running":false}}' >/var/lib/docker/containers/stopped1/config.v2.json
+echo '{"NetworkMode":"bridge","PortBindings":{"5555/tcp":[{"HostIp":"","HostPort":"5555"}]}}' >/var/lib/docker/containers/stopped1/hostconfig.json
+echo '{"Name":"/hostnet1","Config":{"Image":"x"},"State":{"Running":true}}' >/var/lib/docker/containers/hostnet1/config.v2.json
+echo '{"NetworkMode":"host","PortBindings":{"5556/tcp":[{"HostIp":"","HostPort":"5556"}]}}' >/var/lib/docker/containers/hostnet1/hostconfig.json
+
+# --- rarely used protocols: the module list a real kernel would have. tipc is
+# blocked, and modprobe ignores files with no .conf suffix, so sctp is not.
+kernel_dir="/lib/modules/$(uname -r)"
+mkdir -p "$kernel_dir" /etc/modprobe.d
+printf 'kernel/net/rds/rds.ko.zst:\nkernel/net/sctp/sctp.ko.zst:\nkernel/net/tipc/tipc.ko.zst:\n' >"$kernel_dir/modules.dep"
+echo 'install tipc /bin/false' >/etc/modprobe.d/90-e2e.conf
+echo 'blacklist sctp' >/etc/modprobe.d/e2e-no-suffix
+
 # --- processes
 # A symlink made by an attacker gives argv[0] a path that resolves to the running
 # binary. Unlike udevd's, this one belongs to no package and must still be caught.
