@@ -10,6 +10,8 @@
 
 English | [繁體中文](README.zh-TW.md)
 
+![Animated terminal UI: the opening screen, then a live scan of an Ubuntu host with its list of checks](docs/tui-scan.gif)
+
 **A read-only security audit tool and CVE scanner for Ubuntu servers.**
 
 `ubuntu-sys-audit` checks an Ubuntu 18.04, 20.04, 22.04, 24.04 or 26.04 host for missing CVE fixes, signs of compromise and risky configuration. It ships as a single static Go binary: download it, run it with sudo, and read the results in a terminal UI or as JSON. The host needs no agent, compiler or extra packages.
@@ -22,8 +24,6 @@ It helps answer questions like these, on one server or across a fleet:
 - Which hosts have pending security updates, need a reboot or run a release past its support date?
 
 ![Terminal UI listing an Ubuntu host's security findings by severity](docs/tui-results.png)
-
-![Animated terminal UI: the opening screen, then a live scan of an Ubuntu host with its list of checks](docs/tui-scan.gif)
 
 ## Highlights
 
