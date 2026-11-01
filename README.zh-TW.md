@@ -25,7 +25,7 @@
 
 ![終端機介面依嚴重度列出 Ubuntu 主機的安全檢測結果](docs/tui-results.png)
 
-![終端機介面正在掃描 Ubuntu 主機，並即時顯示各項檢查](docs/tui-scan.png)
+![動畫：開場畫面之後，終端機介面即時掃描 Ubuntu 主機並顯示各項檢查](docs/tui-scan.gif)
 
 ## 特色
 

@@ -23,7 +23,7 @@ It helps answer questions like these, on one server or across a fleet:
 
 ![Terminal UI listing an Ubuntu host's security findings by severity](docs/tui-results.png)
 
-![Terminal UI scanning an Ubuntu host, with a live list of checks](docs/tui-scan.png)
+![Animated terminal UI: the opening screen, then a live scan of an Ubuntu host with its list of checks](docs/tui-scan.gif)
 
 ## Highlights
 
