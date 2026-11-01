@@ -36,8 +36,9 @@ ssh host 'sudo ./ubuntu-sys-audit', it writes JSON instead.
 Options:
   --json               Write JSON to stdout without opening the TUI
   --text               Write plain text to stdout without opening the TUI
-  --min-severity LV    In text mode, list only this level and above: critical, high, medium, info, ok, skipped (default medium)
-  -o, --output FILE    Also save the JSON report to FILE (mode 0600)
+  --min-severity LV    In text mode, list only this level and above: critical, high, medium, info, ok (default medium).
+                       Items that could not be checked are always listed
+  -o, --output FILE    Also save the JSON report to a new FILE (mode 0600). An existing file is never overwritten
   --offline            Do not use the network. CVEs are not checked unless --oval-file is given
   --oval-file PATH     Use a local OVAL file (.xml or .xml.bz2), for hosts without internet access
   --proxy URL          HTTP proxy for downloading advisory data
@@ -46,7 +47,8 @@ Options:
   --no-netlink         Do not read BPF filters, which keeps the kernel from loading packet_diag
   --version            Show the version
 
-Exit codes: 0 nothing to act on, 1 medium findings, 2 critical or high findings, 130 scan aborted
+Exit codes: 0 nothing to act on, 1 medium findings, 2 critical or high findings,
+3 scan incomplete (some items could not be checked), 130 scan aborted
 `
 
 func main() {
@@ -114,38 +116,47 @@ func run() int {
 			return 130
 		}
 		fmt.Println(output.Summary(report))
-		if outPath != "" {
-			if err := output.SaveJSON(outPath, report); err != nil {
-				fmt.Fprintln(os.Stderr, "Cannot write report:", err)
-				return 74
-			}
-			fmt.Println("Report saved to", outPath)
-		}
-		return report.ExitCode()
+		return saveReport(outPath, report, report.ExitCode())
 	}
 
 	if os.Geteuid() != 0 {
 		fmt.Fprintln(os.Stderr, "Warning: not running as root, so some items were not checked. Run with sudo.")
 	}
 	report := checks.Run(ctx, opts, nil)
-	if outPath != "" {
-		if err := output.SaveJSON(outPath, report); err != nil {
-			fmt.Fprintln(os.Stderr, "Cannot write report:", err)
-			return 74
-		}
+	code := report.ExitCode()
+	if ctx.Err() != nil {
+		code = 130
 	}
 	if asText {
 		output.Text(os.Stdout, report, threshold)
-	} else {
-		if err := output.JSON(os.Stdout, report); err != nil {
-			fmt.Fprintln(os.Stderr, "Cannot write JSON:", err)
-			return 74
-		}
+	} else if err := output.JSON(os.Stdout, report); err != nil {
+		fmt.Fprintln(os.Stderr, "Cannot write JSON:", err)
+		code = failedOutput(code)
 	}
-	if ctx.Err() != nil {
-		return 130
+	return saveReport(outPath, report, code)
+}
+
+// saveReport runs after the report has reached stdout, so a bad path cannot cost
+// the operator the results.
+func saveReport(path string, report *model.Report, code int) int {
+	if path == "" {
+		return code
 	}
-	return report.ExitCode()
+	if err := output.SaveJSON(path, report); err != nil {
+		fmt.Fprintln(os.Stderr, "Cannot write report:", err)
+		return failedOutput(code)
+	}
+	fmt.Fprintln(os.Stderr, "Report saved to", path)
+	return code
+}
+
+// failedOutput returns the exit code after an output error. It must not replace
+// the code for critical or high findings, which a batch script is watching for.
+func failedOutput(code int) int {
+	if code == 2 {
+		return 2
+	}
+	return 74
 }
 
 func parseSeverity(s string) (model.Severity, bool) {

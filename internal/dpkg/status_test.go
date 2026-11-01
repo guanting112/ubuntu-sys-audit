@@ -1,6 +1,13 @@
 package dpkg
 
-import "testing"
+import (
+	"context"
+	"crypto/md5"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 const statusSample = `Package: nginx-core
 Status: install ok installed
@@ -48,6 +55,7 @@ func TestOrigin(t *testing.T) {
 		"1.26.2-1~jammy":                        "upstream-repo",
 		"1.2.3-4":                               "third-party",
 		"2.0.0-0build1":                         "ubuntu",
+		"1.24.0-1ubuntu1~ppa1":                  "third-party",
 	}
 	for in, want := range cases {
 		if got := Origin(in); got != want {
@@ -69,5 +77,126 @@ func TestNormalizePath(t *testing.T) {
 		if got := NormalizePath(in); got != want {
 			t.Errorf("NormalizePath(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// fakeSystem builds a filesystem and dpkg database for Verify. Every file in
+// files is listed in md5sums with its current content, so tests then change the
+// disk to simulate tampering.
+func fakeSystem(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	oldRoot, oldInfo := fsRoot, infoDir
+	fsRoot, infoDir = root, filepath.Join(root, "info")
+	t.Cleanup(func() { fsRoot, infoDir = oldRoot, oldInfo })
+	if err := os.MkdirAll(infoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var sums []byte
+	for rel, content := range files {
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		h := md5.Sum([]byte(content))
+		sums = append(sums, []byte(hex.EncodeToString(h[:])+"  "+rel+"\n")...)
+	}
+	if err := os.WriteFile(filepath.Join(infoDir, "pkg.md5sums"), sums, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func verifyAll(t *testing.T) VerifyResult {
+	t.Helper()
+	res, err := Verify(context.Background(), nil, func(string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+func TestVerifyCleanSystem(t *testing.T) {
+	fakeSystem(t, map[string]string{"usr/bin/a": "a", "usr/bin/b": "b"})
+	res := verifyAll(t)
+	if res.Checked != 2 || len(res.Mismatches)+len(res.Missing)+res.Unreadable != 0 {
+		t.Errorf("%+v", res)
+	}
+}
+
+func TestVerifyFindsModifiedFileOnUnmergedUsr(t *testing.T) {
+	root := fakeSystem(t, map[string]string{"bin/login": "login", "usr/bin/who": "who"})
+	if err := os.WriteFile(filepath.Join(root, "bin/login"), []byte("trojan"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res := verifyAll(t)
+	if res.Checked != 2 || len(res.Mismatches) != 1 || res.Mismatches[0].Path != "/bin/login" {
+		t.Errorf("/bin/login must be hashed where it really is: %+v", res)
+	}
+}
+
+func TestVerifyFindsFileRecordedUnderBinOnMergedUsr(t *testing.T) {
+	root := fakeSystem(t, map[string]string{"usr/bin/ps": "ps"})
+	sums := filepath.Join(infoDir, "pkg.md5sums")
+	b, _ := os.ReadFile(sums)
+	moved := []byte(string(b[:34]) + "bin/ps\n")
+	if err := os.WriteFile(sums, moved, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "usr/bin/ps"), []byte("trojan"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res := verifyAll(t)
+	if len(res.Mismatches) != 1 {
+		t.Errorf("a package recording /bin/ps with only /usr/bin/ps on disk: %+v", res)
+	}
+}
+
+func TestVerifyFindsFileReplacedBySymlink(t *testing.T) {
+	root := fakeSystem(t, map[string]string{"usr/bin/sudo": "sudo"})
+	target := filepath.Join(root, "evil")
+	if err := os.WriteFile(target, []byte("evil"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	full := filepath.Join(root, "usr/bin/sudo")
+	if err := os.Remove(full); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, full); err != nil {
+		t.Fatal(err)
+	}
+	res := verifyAll(t)
+	if len(res.Mismatches) != 1 || res.Mismatches[0].LinkTarget != target {
+		t.Errorf("symlink replacement missed: %+v", res)
+	}
+}
+
+func TestVerifyReportsMissingFile(t *testing.T) {
+	root := fakeSystem(t, map[string]string{"usr/bin/gone": "x", "usr/bin/here": "y"})
+	if err := os.Remove(filepath.Join(root, "usr/bin/gone")); err != nil {
+		t.Fatal(err)
+	}
+	res := verifyAll(t)
+	if res.Checked != 1 || len(res.Missing) != 1 || res.Missing[0].Path != "/usr/bin/gone" {
+		t.Errorf("%+v", res)
+	}
+}
+
+func TestVerifyDedupesMergedPaths(t *testing.T) {
+	root := fakeSystem(t, map[string]string{"usr/bin/x": "x"})
+	if err := os.Symlink("usr/bin", filepath.Join(root, "bin")); err != nil {
+		t.Fatal(err)
+	}
+	sums := filepath.Join(infoDir, "pkg.md5sums")
+	b, _ := os.ReadFile(sums)
+	both := append(append([]byte{}, b...), []byte(string(b[:34])+"bin/x\n")...)
+	if err := os.WriteFile(sums, both, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := verifyAll(t); res.Checked != 1 {
+		t.Errorf("one file listed under two paths must be checked once: %+v", res)
 	}
 }

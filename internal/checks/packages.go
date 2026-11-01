@@ -188,7 +188,8 @@ func checkAptSources(c *Context) []model.Finding {
 				continue
 			}
 			for _, m := range aptURIRe.FindAllStringSubmatch(line, -1) {
-				host := strings.ToLower(m[1])
+				// A mirror URL can carry user:password@, which must not reach the report.
+				host := strings.ToLower(m[1][strings.LastIndexByte(m[1], '@')+1:])
 				if !ubuntuHosts.MatchString(host) {
 					hosts[host] = true
 				}

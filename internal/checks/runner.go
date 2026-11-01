@@ -141,12 +141,23 @@ func Run(ctx context.Context, opts Options, onEvent func(Event)) *model.Report {
 	return report
 }
 
+// softDeadline is when a check is told to stop. Its hard limit comes later, so a
+// check that notices has time to return what it already found. Without the gap
+// both fire together and findings such as a trojaned sshd would be thrown away.
+func softDeadline(hard time.Duration) time.Duration {
+	margin := hard / 10
+	if margin > 15*time.Second {
+		margin = 15 * time.Second
+	}
+	return hard - margin
+}
+
 func runOne(parent context.Context, base *Context, chk Check) ([]model.Finding, string) {
 	timeout := chk.Timeout
 	if timeout <= 0 {
 		timeout = time.Minute
 	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
+	ctx, cancel := context.WithTimeout(parent, softDeadline(timeout))
 	defer cancel()
 
 	type result struct {
@@ -163,19 +174,40 @@ func runOne(parent context.Context, base *Context, chk Check) ([]model.Finding, 
 		done <- result{found: chk.Run(base.withCtx(ctx))}
 	}()
 
+	unfinished := func(reason string) ([]model.Finding, string) {
+		return []model.Finding{skipped(chk.ID+".timeout", chk.Category, chk.Name+": not finished", reason)}, reason
+	}
+	hard := time.NewTimer(timeout)
+	defer hard.Stop()
 	select {
 	case r := <-done:
 		if r.err != "" {
 			return []model.Finding{skipped(chk.ID+".error", chk.Category, chk.Name+": check failed", r.err)}, r.err
 		}
-		return r.found, ""
-	case <-ctx.Done():
-		msg := "Hit the " + timeout.String() + " time limit, so this check did not finish."
-		if parent.Err() != nil {
-			msg = "Scan aborted."
+		if ctx.Err() == nil {
+			return r.found, ""
 		}
-		return []model.Finding{skipped(chk.ID+".timeout", chk.Category, chk.Name+": not finished", msg)}, msg
+		// The check stopped early, so what it returned is partial. Keep it, and
+		// make sure the report says so.
+		msg := "Hit the " + timeout.String() + " time limit, so these results are incomplete."
+		if !hasSkipped(r.found) {
+			r.found = append(r.found, skipped(chk.ID+".partial", chk.Category, chk.Name+": not finished", msg))
+		}
+		return r.found, msg
+	case <-hard.C:
+		return unfinished("Hit the " + timeout.String() + " time limit, so this check did not finish.")
+	case <-parent.Done():
+		return unfinished("Scan aborted.")
 	}
+}
+
+func hasSkipped(found []model.Finding) bool {
+	for _, f := range found {
+		if f.Severity == model.Skipped {
+			return true
+		}
+	}
+	return false
 }
 
 // withCtx returns a view of the context bound to a per check deadline while

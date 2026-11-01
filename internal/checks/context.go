@@ -32,11 +32,14 @@ type Options struct {
 
 // User is an /etc/passwd entry.
 type User struct {
-	Name  string
-	UID   int
-	GID   int
-	Home  string
-	Shell string
+	Name string
+	// Password is the state of the /etc/passwd password field: "shadow", "empty",
+	// "locked" or "inline". A hash stored there is never kept.
+	Password string
+	UID      int
+	GID      int
+	Home     string
+	Shell    string
 }
 
 // ShadowEntry is a parsed /etc/shadow row. The password hash is reduced to its
@@ -87,6 +90,8 @@ type shared struct {
 
 	groupsOnce sync.Once
 	groups     map[string][]string
+
+	selfExe string
 }
 
 // NewContext gathers basic host facts.
@@ -113,6 +118,18 @@ func NewContext(ctx context.Context, opts Options) *Context {
 	}
 	if c.Host.Hostname == "" {
 		c.Host.Hostname, _ = os.Hostname()
+	}
+	// These reach the terminal, and a compromised host controls all of them.
+	c.Host.Hostname = model.Clean(c.Host.Hostname)
+	c.Host.OSName = model.Clean(c.Host.OSName)
+	c.Host.OSVersion = model.Clean(c.Host.OSVersion)
+	c.Host.Codename = model.Clean(c.Host.Codename)
+	c.Host.Kernel = model.Clean(c.Host.Kernel)
+	if exe, err := os.Executable(); err == nil {
+		if real, err := filepath.EvalSymlinks(exe); err == nil {
+			exe = real
+		}
+		c.selfExe = exe
 	}
 	return c
 }
@@ -238,9 +255,21 @@ func parsePasswd(s string) []User {
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		out = append(out, User{Name: f[0], UID: uid, GID: gid, Home: f[5], Shell: f[6]})
+		out = append(out, User{Name: f[0], Password: passwdField(f[1]), UID: uid, GID: gid, Home: f[5], Shell: f[6]})
 	}
 	return out
+}
+
+func passwdField(v string) string {
+	switch {
+	case v == "x":
+		return "shadow"
+	case v == "":
+		return "empty"
+	case strings.HasPrefix(v, "*") || strings.HasPrefix(v, "!"):
+		return "locked"
+	}
+	return "inline"
 }
 
 // Shadow returns password status per user.
@@ -335,7 +364,8 @@ func (c *Context) Homes() []User {
 			h == "/proc" || h == "/run" || strings.HasPrefix(h, "/run/") {
 			continue
 		}
-		if st, err := os.Lstat(h); err != nil || !st.IsDir() {
+		// Stat, not Lstat: /home/x -> /data/x is a normal setup, and root set it.
+		if st, err := os.Stat(h); err != nil || !st.IsDir() {
 			continue
 		}
 		seen[h] = true
@@ -367,6 +397,14 @@ func finding(id string, cat model.Category, sev model.Severity, title string) mo
 
 func skipped(id string, cat model.Category, title, reason string) model.Finding {
 	return model.Finding{ID: id, Category: cat, Severity: model.Skipped, Title: title, Detail: reason}
+}
+
+// requested reports a check the operator turned off with a flag. It is still
+// listed, but does not count against the scan being complete.
+func requested(id string, cat model.Category, title, reason string) model.Finding {
+	f := skipped(id, cat, title, reason)
+	f.Requested = true
+	return f
 }
 
 func needRoot(id string, cat model.Category, title string) model.Finding {

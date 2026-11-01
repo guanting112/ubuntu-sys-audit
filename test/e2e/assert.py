@@ -10,6 +10,10 @@ SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "info": 3, "ok": 4, "ski
 PLANTED = {
     "accounts.uid0": "critical",
     "accounts.empty_password": "critical",
+    "accounts.passwd_empty": "critical",
+    "accounts.passwd_hash": "critical",
+    "integrity.pam_rogue": "critical",
+    "persistence.home_symlink": "high",
     "accounts.sudo_system": "critical",
     "accounts.service_shell": "high",
     "accounts.history_wiped": "high",
@@ -38,7 +42,11 @@ PLANTED = {
 }
 
 # Secrets planted on the host. None may appear anywhere in a report.
-SECRETS = ["AAAABBBBCCCCDDDD", "hunter2", "$6$saltsalt"]
+SECRETS = ["AAAABBBBCCCCDDDD", "hunter2", "$6$saltsalt", "S3CRET1", "S3CRET2", "S3CRET3", "S3CRET4", "S3CRET5"]
+
+# Categories where a critical or high finding on a stock host is a false alarm.
+# CVEs and support status are real on old releases.
+NO_ALARM_WHEN_CLEAN = {"accounts", "ssh", "network", "process", "integrity", "persistence", "filesystem", "web"}
 
 
 def load(path):
@@ -55,13 +63,28 @@ def worst_by_id(report):
     return worst
 
 
+def evidence(report, finding_id):
+    return " ".join(
+        line
+        for finding in report["findings"]
+        if finding["id"] == finding_id
+        for line in finding.get("evidence", [])
+    )
+
+
 def check_clean(report):
     worst = worst_by_id(report)
-    return [
+    failures = [
         f"clean host wrongly reports {fid} at {required} or above"
         for fid, required in PLANTED.items()
         if worst.get(fid, 99) <= SEVERITY_RANK[required]
     ]
+    failures += [
+        f"false alarm on a clean host: {f['id']} [{f['severity']}] {f['title']}"
+        for f in report["findings"]
+        if f["category"] in NO_ALARM_WHEN_CLEAN and SEVERITY_RANK[f["severity"]] <= SEVERITY_RANK["high"]
+    ]
+    return failures
 
 
 def check_planted(report, raw):
@@ -71,21 +94,38 @@ def check_planted(report, raw):
         for fid, required in PLANTED.items()
         if worst.get(fid, 99) > SEVERITY_RANK[required]
     ]
-    failures += [f"secret leaked into report: {s}" for s in SECRETS if s in raw]
+    # Case insensitive: lowercasing a value must not count as hiding it.
+    failures += [f"secret leaked into report: {s}" for s in SECRETS if s.lower() in raw.lower()]
     if "\x1b" in raw or "\\u001b" in raw:
         failures.append("raw terminal escape in report")
     if "NOPASSWD:ALL" not in raw:
         failures.append("redaction mangled sudoers evidence")
-    masquerade = " ".join(
-        line
-        for finding in report["findings"]
-        if finding["id"] == "process.masquerade"
-        for line in finding.get("evidence", [])
-    )
+    masquerade = evidence(report, "process.masquerade")
     if "/usr/sbin/auditd" not in masquerade:
         failures.append("attacker made symlink was accepted as a legitimate alias")
     if "systemd-udevd" in masquerade:
         failures.append("udevd reported as masquerading after a package upgrade")
+
+    def expect(finding_id, text, message):
+        if text not in evidence(report, finding_id):
+            failures.append(f"{message} ({finding_id} lacks {text!r})")
+
+    def refuse(finding_id, text, message):
+        if text in evidence(report, finding_id):
+            failures.append(f"{message} ({finding_id} has {text!r})")
+
+    expect("integrity.binaries_key", "/login", "a trojaned login was not found")
+    expect("integrity.binaries_key", "/usr/bin/passwd", "a binary replaced by a symlink was not found")
+    expect("integrity.binaries_missing", "/usr/bin/chage", "a deleted binary was not reported")
+    expect("web.shell.critical", "/data/www2/hidden.php", "a webshell behind a symlinked release was not found")
+    expect("persistence.systemd_temp", "linked.service", "a unit linked from a temp directory was not found")
+    expect("process.deleted_exe", "nginx", "the stale nginx test did not run")
+    refuse("network.listener_bad_exe", "nginx", "a service awaiting restart was called malware")
+    refuse("process.temp_exe", "/tmp/audit", "the tool flagged itself")
+    refuse("filesystem.temp_elf", "/tmp/audit", "the tool flagged its own binary")
+    durations = {c["id"]: c["duration_ms"] for c in report["checks"]}
+    if durations.get("web.nginx", 0) > 30000:
+        failures.append(f"a FIFO stalled the nginx check for {durations['web.nginx']} ms")
     return failures
 
 

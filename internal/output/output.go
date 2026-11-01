@@ -3,9 +3,12 @@ package output
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -22,29 +25,77 @@ func JSON(w io.Writer, r *model.Report) error {
 	return enc.Encode(r)
 }
 
-// SaveJSON writes the report to path, readable only by its owner: it lists
-// accounts, keys and weaknesses. When the tool runs under sudo the file goes
-// back to the invoking user, so the report is not stranded as root owned.
+// SaveJSON writes the report to a new file readable only by its owner, because
+// it lists accounts, keys and weaknesses.
+//
+// The tool often runs as root on behalf of someone with limited sudo rights, so
+// the path is treated as untrusted. Refusing to overwrite means it cannot destroy
+// /etc/shadow, or follow a planted symlink or block on a FIFO, since O_EXCL fails
+// on anything already there. Under sudo the file goes back to the invoking user,
+// so the parent directory must be one that user could write to anyway; otherwise
+// -o /etc/cron.d/x would hand them a root owned location they then control.
 func SaveJSON(path string, r *model.Report) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o600)
+	uid, gid, viaSudo := invokingUser()
+	if viaSudo {
+		if err := checkParent(path, uid, gid); err != nil {
+			return err
+		}
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("%s already exists, and reports never overwrite a file", path)
+		}
+		return err
+	}
+	defer f.Close()
+	if viaSudo {
+		// On the descriptor, so a path swapped after the open changes nothing.
+		if err := f.Chown(uid, gid); err != nil {
+			return err
+		}
+	}
+	if err := JSON(f, r); err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func invokingUser() (uid, gid int, ok bool) {
+	if os.Geteuid() != 0 {
+		return 0, 0, false
+	}
+	uid, err1 := strconv.Atoi(os.Getenv("SUDO_UID"))
+	gid, err2 := strconv.Atoi(os.Getenv("SUDO_GID"))
+	if err1 != nil || err2 != nil || uid <= 0 {
+		return 0, 0, false
+	}
+	return uid, gid, true
+}
+
+func checkParent(path string, uid, gid int) error {
+	dir := filepath.Dir(path)
+	st, err := os.Stat(dir)
 	if err != nil {
 		return err
 	}
-	if err := JSON(f, r); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if os.Geteuid() == 0 {
-		uid, err1 := strconv.Atoi(os.Getenv("SUDO_UID"))
-		gid, err2 := strconv.Atoi(os.Getenv("SUDO_GID"))
-		if err1 == nil && err2 == nil && uid > 0 {
-			_ = os.Chown(path, uid, gid)
-		}
+	sys, ok := st.Sys().(*syscall.Stat_t)
+	if !ok || !parentAllows(st.Mode().Perm(), int(sys.Uid), int(sys.Gid), uid, gid) {
+		return fmt.Errorf("%s is not writable by the user who ran sudo, so choose a directory they can write to", dir)
 	}
 	return nil
+}
+
+// parentAllows checks only the primary group. Refusing a directory that a
+// supplementary group could write to is the safe way to be wrong.
+func parentAllows(mode fs.FileMode, ownerUID, ownerGID, uid, gid int) bool {
+	switch {
+	case ownerUID == uid:
+		return mode&0o200 != 0
+	case ownerGID == gid:
+		return mode&0o020 != 0
+	}
+	return mode&0o002 != 0
 }
 
 // DefaultFilename builds a report name from the host and scan time.
@@ -71,9 +122,14 @@ func Text(w io.Writer, r *model.Report, minSeverity model.Severity) {
 		fmt.Fprintln(w, "Warning: not running as root, so some items were not checked.")
 	}
 	fmt.Fprintln(w, Summary(r))
+	if r.Incomplete {
+		fmt.Fprintln(w, "Incomplete: some items could not be checked, so do not treat this as a clean result.")
+	}
 	fmt.Fprintln(w)
 	for _, f := range r.Findings {
-		if f.Severity > minSeverity {
+		// Unfinished checks are always listed: hiding them would make a partial
+		// scan look complete.
+		if f.Severity > minSeverity && f.Severity != model.Skipped {
 			continue
 		}
 		fmt.Fprintf(w, "[%s] %s  (%s)\n", f.Severity.Label(), f.Title, f.Category.Label())

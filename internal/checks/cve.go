@@ -162,12 +162,16 @@ func checkCVE(c *Context) []model.Finding {
 		return []model.Finding{skipped("cve.usn", cat, title, "No OVAL data for this release ("+c.Host.Codename+").")}
 	}
 	if c.Opts.Offline && c.Opts.OVALFile == "" {
-		f := skipped("cve.usn", cat, title, "Offline mode without --oval-file, so CVEs were not checked.")
+		f := requested("cve.usn", cat, title, "Offline mode without --oval-file, so CVEs were not checked.")
 		f.Remediation = "On a machine with internet access, download " + oval.FeedURL(c.Host.Codename) + " and pass it with --oval-file."
 		return []model.Finding{f}
 	}
-	if _, err := c.Packages(); err != nil {
+	pkgs, err := c.Packages()
+	if err != nil {
 		return []model.Finding{skipped("cve.usn", cat, title, "Cannot read the dpkg database: "+err.Error())}
+	}
+	if len(pkgs) == 0 {
+		return []model.Finding{skipped("cve.usn", cat, title, "The dpkg database lists no installed packages, so there was nothing to compare.")}
 	}
 	feed, err := loadFeed(c)
 	if err != nil {
@@ -175,12 +179,40 @@ func checkCVE(c *Context) []model.Finding {
 		f.Remediation = "Confirm the host can reach security-metadata.canonical.com, use --proxy, or download the file and pass it with --oval-file."
 		return []model.Finding{f}
 	}
+	// Bad data must not read as a pass: an empty or wrong file finds nothing to fix.
+	if feed.DefinitionCount() == 0 {
+		f := skipped("cve.usn", cat, title, "The OVAL data holds no USN definitions. It may be the wrong kind of file.")
+		f.Remediation = "Use " + oval.FeedURL(c.Host.Codename)
+		return []model.Finding{f}
+	}
+	if feed.Release != c.Host.Codename {
+		f := skipped("cve.usn", cat, title, fmt.Sprintf("The OVAL data is for %q but this host runs %q, so results would be meaningless.", feed.Release, c.Host.Codename))
+		f.Remediation = "Use " + oval.FeedURL(c.Host.Codename)
+		return []model.Finding{f}
+	}
 	var out []model.Finding
-	if ts, err := time.Parse("2006-01-02T15:04:05", feed.Timestamp); err == nil && time.Since(ts) > 14*24*time.Hour {
+	ts, tsErr := time.Parse("2006-01-02T15:04:05", feed.Timestamp)
+	switch {
+	case tsErr != nil:
+		f := finding("cve.feed_stale", cat, model.Medium, "OVAL data has no readable date")
+		f.Detail = "This scan cannot tell how old the data is, so it may miss recent vulnerabilities."
+		f.Remediation = "Download the latest OVAL file."
+		out = append(out, f)
+	case time.Since(ts) > 14*24*time.Hour:
 		f := finding("cve.feed_stale", cat, model.Medium, fmt.Sprintf("OVAL data is %d days old", int(time.Since(ts).Hours()/24)))
 		f.Detail = "The data is dated " + feed.Timestamp + ", so vulnerabilities announced later are not covered."
 		f.Remediation = "Download the latest OVAL file."
 		out = append(out, f)
+	}
+	if !feed.KernelRecognized(c.Host.Kernel) {
+		reason := "This kernel matches no flavour in Ubuntu's USN data, as with mainline or custom kernels, so kernel CVEs were not checked."
+		if c.Host.InContainer {
+			f := finding("cve.kernel", cat, model.Info, "Kernel CVEs not checked inside a container")
+			f.Detail = "The kernel belongs to the host, so run this scan there."
+			out = append(out, f)
+		} else {
+			out = append(out, skipped("cve.kernel", cat, "Kernel CVEs for "+c.Host.Kernel, reason))
+		}
 	}
 	hits := feed.Evaluate(c.PackageVersions(), c.Host.Kernel)
 	if len(hits) == 0 {

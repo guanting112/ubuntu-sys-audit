@@ -218,7 +218,9 @@ func checkSysctl(c *Context) []model.Finding {
 			}
 		}
 	}
-	if len(weak) == 0 {
+	if missing == len(sysctlRules) {
+		out = append(out, skipped("system.sysctl", cat, "Kernel security parameters", "Could not read any setting from /proc/sys."))
+	} else if len(weak) == 0 {
 		out = append(out, finding("system.sysctl", cat, model.OK, "Kernel security parameters match recommendations"))
 	} else {
 		f := finding("system.sysctl", cat, worst, fmt.Sprintf("Weak kernel security parameters (%d)", len(weak)))
@@ -229,17 +231,11 @@ func checkSysctl(c *Context) []model.Finding {
 
 	// A handler piped from core_pattern or a changed modprobe path runs as
 	// root inside the kernel's usermode helper, a known persistence trick.
-	if cp := fsx.ProcString("/proc/sys/kernel/core_pattern"); strings.HasPrefix(cp, "|") {
+	// Inside a container this setting belongs to the host, whose files are not here.
+	if cp := fsx.ProcString("/proc/sys/kernel/core_pattern"); strings.HasPrefix(cp, "|") && !c.Host.InContainer {
 		handler := strings.Fields(strings.TrimPrefix(cp, "|"))
-		known := []string{"apport", "systemd-coredump", "whoopsie", "abrt", "orbstack"}
-		ok := false
-		for _, k := range known {
-			if len(handler) > 0 && strings.Contains(handler[0], k) {
-				ok = true
-			}
-		}
-		if !ok {
-			f := finding("system.core_pattern", model.CatIntegrity, model.Critical, "core_pattern points to an unknown handler")
+		if len(handler) == 0 || !c.Owned(handler[0]) {
+			f := finding("system.core_pattern", model.CatIntegrity, model.Critical, "core_pattern points to a handler from no package")
 			f.Detail = "When a program crashes, the kernel runs this handler as root, which makes it a common persistence trick."
 			f.Evidence = []string{cp}
 			out = append(out, f)

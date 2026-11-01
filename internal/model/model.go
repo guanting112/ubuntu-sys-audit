@@ -95,6 +95,9 @@ type Finding struct {
 	Remediation string   `json:"remediation,omitempty"`
 	Refs        []string `json:"refs,omitempty"`
 	Focus       bool     `json:"focus,omitempty"`
+	// Requested marks a skipped check the operator turned off with a flag, which
+	// does not make the scan incomplete.
+	Requested bool `json:"requested,omitempty"`
 }
 
 // Host describes the scanned machine.
@@ -161,6 +164,7 @@ type Report struct {
 	DurationMS int64           `json:"duration_ms"`
 	Host       Host            `json:"host"`
 	Summary    Summary         `json:"summary"`
+	Incomplete bool            `json:"incomplete"`
 	Findings   []Finding       `json:"findings"`
 	Inventory  []InventoryItem `json:"inventory,omitempty"`
 	Checks     []CheckResult   `json:"checks"`
@@ -170,7 +174,11 @@ type Report struct {
 func (r *Report) Finalize() {
 	SortFindings(r.Findings)
 	r.Summary = Summary{}
+	r.Incomplete = false
 	for _, f := range r.Findings {
+		if f.Severity == Skipped && !f.Requested {
+			r.Incomplete = true
+		}
 		switch f.Severity {
 		case Critical:
 			r.Summary.Critical++
@@ -209,12 +217,16 @@ func SortFindings(fs []Finding) {
 	})
 }
 
-// ExitCode maps the summary to a process exit code: 2 for critical or high
-// findings, 1 for medium findings, 0 otherwise.
+// ExitCode maps the report to a process exit code: 2 for critical or high
+// findings, 3 when something could not be checked, 1 for medium findings and 0
+// otherwise. An incomplete scan outranks medium findings because a low code must
+// never suggest a host is fine when part of the scan did not run.
 func (r *Report) ExitCode() int {
 	switch {
 	case r.Summary.Critical > 0 || r.Summary.High > 0:
 		return 2
+	case r.Incomplete:
+		return 3
 	case r.Summary.Medium > 0:
 		return 1
 	}
@@ -223,23 +235,44 @@ func (r *Report) ExitCode() int {
 
 const maxLineRunes = 600
 
+// keywordSecret matches KEY=value and KEY: value for anything ending in a secret
+// sounding word, so PGPASSWORD=x and DB_PASS=x are covered. The leading class
+// keeps a path like /etc/passwd: from counting as a key.
+var keywordSecret = regexp.MustCompile(`(?i)(^|[^a-z0-9_/.-])([a-z0-9_-]*(?:pass(?:word|wd)?|pwd|token|secret|api[_-]?key|access[_-]?key)["']?[ \t]*[=:][ \t]*)("[^"]*"|'[^']*'|[^\s&;,]+)`)
+
+// secretPatterns cover credentials passed the way common command line tools take
+// them. Each keeps group 1 and masks group 2.
 var secretPatterns = []*regexp.Regexp{
-	// The leading class requires a non letter before the keyword, so sudoers'
-	// NOPASSWD:ALL stays readable while DB_PASSWORD=x is still masked.
-	regexp.MustCompile(`(?i)((?:^|[^a-z])(?:pass(?:word|wd)?|pwd|token|secret|api[_-]?key|access[_-]?key)[ \t]*[=:][ \t]*)("[^"]*"|'[^']*'|[^\s&;,]+)`),
 	regexp.MustCompile(`(?i)(--?(?:pass(?:word|wd)?|token|secret|api-?key)[ \t]+)(\S+)`),
-	regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://[^\s:/@]+:)([^\s/@]+)(@)`),
-	regexp.MustCompile(`(\$(?:1|2[aby]|5|6|y|gy|7)\$)[./A-Za-z0-9$,=-]{8,}`),
+	regexp.MustCompile(`((?:^|[\s;|&/])(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^|;&]*\s-p)([^\s-]\S*)`),
+	regexp.MustCompile(`(sshpass\s+-p[ \t]*)(\S+)`),
+	regexp.MustCompile(`(redis-cli\b[^|;&]*\s-a[ \t]+)(\S+)`),
+	regexp.MustCompile(`((?:curl|wget)\b[^|;&]*\s(?:-u|--user)[ \t=]+[^\s:]+:)(\S+)`),
+	regexp.MustCompile(`(?i)(\b(?:bearer|basic)[ \t]+)([a-z0-9._~+/=-]{6,})`),
 }
 
-// Redact masks values that look like credentials. Command lines and config
-// lines end up in reports people pass around, so they must not carry secrets.
+var (
+	urlPassword = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://[^\s:/@]+:)([^\s/@]+)(@)`)
+	cryptHash   = regexp.MustCompile(`(\$(?:1|2[aby]|5|6|y|gy|7)\$)[./A-Za-z0-9$,=-]{8,}`)
+)
+
+// Redact masks values that look like credentials. Command lines and config lines
+// end up in reports people pass around, so they should not carry secrets. It
+// covers common forms only, so reports still need handling with care.
 func Redact(s string) string {
-	s = secretPatterns[0].ReplaceAllString(s, "${1}***")
-	s = secretPatterns[1].ReplaceAllString(s, "${1}***")
-	s = secretPatterns[2].ReplaceAllString(s, "${1}***${3}")
-	s = secretPatterns[3].ReplaceAllString(s, "${1}***")
-	return s
+	s = keywordSecret.ReplaceAllStringFunc(s, func(match string) string {
+		m := keywordSecret.FindStringSubmatch(match)
+		// sudoers' NOPASSWD:ALL is a setting worth reading, not a secret.
+		if strings.HasPrefix(strings.ToLower(m[2]), "nopasswd") {
+			return match
+		}
+		return m[1] + m[2] + "***"
+	})
+	for _, re := range secretPatterns {
+		s = re.ReplaceAllString(s, "${1}***")
+	}
+	s = urlPassword.ReplaceAllString(s, "${1}***${3}")
+	return cryptHash.ReplaceAllString(s, "${1}***")
 }
 
 // Sanitize makes an untrusted string safe to print on a terminal: control

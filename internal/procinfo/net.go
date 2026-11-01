@@ -143,6 +143,20 @@ func ParsePacketTable(data []byte) []PacketSocket {
 	return out
 }
 
+// keepSocket decides whether a table row is new. Connections with inode 0 are in
+// TIME_WAIT and have no owner, so they are not interesting. A listener with inode
+// 0 is kept: dropping it would report an open port as closed.
+func keepSocket(s Socket, seen map[uint64]bool) bool {
+	if s.Inode == 0 {
+		return s.Listening()
+	}
+	if seen[s.Inode] {
+		return false
+	}
+	seen[s.Inode] = true
+	return true
+}
+
 // NetView holds every socket on the host across network namespaces.
 type NetView struct {
 	Sockets []Socket
@@ -182,12 +196,9 @@ func CollectNet(procs []*Process) *NetView {
 				continue
 			}
 			for _, s := range ParseSocketTable(proto, b) {
-				// Connected sockets with inode 0 are in TIME_WAIT; they have
-				// no owner and are not interesting here.
-				if s.Inode == 0 || seen[s.Inode] {
+				if !keepSocket(s, seen) {
 					continue
 				}
-				seen[s.Inode] = true
 				s.NetNS, s.HostNS = ns, isHost
 				view.Sockets = append(view.Sockets, s)
 			}

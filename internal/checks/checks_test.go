@@ -1,12 +1,15 @@
 package checks
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 
 	"ubuntu-sys-audit/internal/model"
+	"ubuntu-sys-audit/internal/procinfo"
 )
 
 const nginxPage = `<html><body><ul>
@@ -265,6 +268,102 @@ func TestParseMountSkips(t *testing.T) {
 	}
 }
 
+func TestSSHDTokens(t *testing.T) {
+	cases := []struct {
+		line string
+		key  string
+		args []string
+	}{
+		{"PermitRootLogin yes", "permitrootlogin", []string{"yes"}},
+		{"PermitRootLogin = yes", "permitrootlogin", []string{"yes"}},
+		{"PermitRootLogin=yes", "permitrootlogin", []string{"yes"}},
+		{"permitrootlogin\t\tyes", "permitrootlogin", []string{"yes"}},
+		{`PermitEmptyPasswords "yes"`, "permitemptypasswords", []string{"yes"}},
+		{"PasswordAuthentication no # keys only", "passwordauthentication", []string{"no"}},
+		{`Include "/etc/ssh/my conf.d/*.conf"`, "include", []string{"/etc/ssh/my conf.d/*.conf"}},
+		{"Match User deploy Address 10.0.0.1", "match", []string{"User", "deploy", "Address", "10.0.0.1"}},
+		{"# a comment", "", nil},
+		{"   ", "", nil},
+	}
+	for _, c := range cases {
+		key, args := sshdTokens(c.line)
+		if key != c.key || strings.Join(args, "|") != strings.Join(c.args, "|") {
+			t.Errorf("sshdTokens(%q) = %q %v, want %q %v", c.line, key, args, c.key, c.args)
+		}
+	}
+}
+
+func TestSSHDConfigScoping(t *testing.T) {
+	dir := t.TempDir()
+	dropIn := dir + "/50-extra.conf"
+	if err := os.WriteFile(dropIn, []byte("Match User deploy\n  PasswordAuthentication yes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	main := dir + "/sshd_config"
+	content := "Include " + dropIn + "\nPermitRootLogin = yes\nPermitRootLogin no\nPasswordAuthentication no\nMatch all\n  X11Forwarding yes\n  PasswordAuthentication yes\nMatch User bob\n  PermitRootLogin yes\n"
+	if err := os.WriteFile(main, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := newSSHDConfig()
+	cfg.parseFile(main, 0)
+	if got := cfg.get("permitrootlogin", "?"); got != "yes" {
+		t.Errorf("a Match in an included file must not end the main file, and the first value wins: %q", got)
+	}
+	if got := cfg.get("passwordauthentication", "?"); got != "yes" {
+		t.Errorf("Match all applies to everyone and overrides the global value: %q", got)
+	}
+	if len(cfg.risky) != 2 {
+		t.Errorf("conditional blocks loosening access should be recorded: %v", cfg.risky)
+	}
+}
+
+func TestPasswdFieldKeepsNoHash(t *testing.T) {
+	users := parsePasswd("a:x:1:1::/h:/bin/sh\nb::2:2::/h:/bin/sh\nc:*:3:3::/h:/bin/sh\nd:!:4:4::/h:/bin/sh\ne:$1$abc$def:5:5::/h:/bin/sh\n")
+	want := []string{"shadow", "empty", "locked", "locked", "inline"}
+	for i, u := range users {
+		if u.Password != want[i] {
+			t.Errorf("%s: %q, want %q", u.Name, u.Password, want[i])
+		}
+	}
+}
+
+func TestStockServiceShell(t *testing.T) {
+	pg := map[string][]string{"postgresql-common": {"1"}}
+	if !stockServiceShell(User{Name: "postgres", Shell: "/bin/bash"}, pg) {
+		t.Error("postgres keeps a shell by package default")
+	}
+	if stockServiceShell(User{Name: "postgres", Shell: "/bin/bash"}, nil) {
+		t.Error("without the package, an account named postgres is not explained")
+	}
+	if stockServiceShell(User{Name: "www-data", Shell: "/bin/bash"}, pg) {
+		t.Error("www-data must not be exempt")
+	}
+}
+
+func TestStockCapabilities(t *testing.T) {
+	if !stockCapabilities("/usr/lib/snapd/snap-confine", true) {
+		t.Error("packaged snap-confine ships with capabilities")
+	}
+	if stockCapabilities("/usr/lib/snapd/snap-confine", false) {
+		t.Error("an unpackaged file at that path is not explained")
+	}
+	if stockCapabilities("/usr/bin/python3", true) {
+		t.Error("setcap on a packaged interpreter is a backdoor")
+	}
+}
+
+func TestContainerMultiCallIsNotMasquerade(t *testing.T) {
+	c := NewContext(context.Background(), Options{})
+	crond := procinfo.Process{InContainer: true, Exe: "/bin/busybox", Cmdline: []string{"crond", "-f"}}
+	if !argv0IsAlias(c, &crond) {
+		t.Error("crond under busybox in a container is normal")
+	}
+	crond.InContainer = false
+	if argv0IsAlias(c, &crond) {
+		t.Error("on the host, busybox posing as crond still needs a look")
+	}
+}
+
 func TestParseUtmp(t *testing.T) {
 	rec := make([]byte, utmpSize)
 	rec[0] = utUserProc
@@ -416,6 +515,53 @@ func TestMPTCPFinding(t *testing.T) {
 	}
 }
 
+func TestTimeoutKeepsPartialResults(t *testing.T) {
+	chk := Check{ID: "x", Name: "x", Category: model.CatWeb, Timeout: 200 * time.Millisecond, Run: func(c *Context) []model.Finding {
+		<-c.Ctx.Done()
+		return []model.Finding{{ID: "found", Severity: model.Critical, Title: "webshell found before the deadline"}}
+	}}
+	for range 20 {
+		found, errText := runOne(context.Background(), NewContext(context.Background(), Options{}), chk)
+		ids := map[string]bool{}
+		for _, f := range found {
+			ids[f.ID] = true
+		}
+		if !ids["found"] {
+			t.Fatalf("partial finding was thrown away: %+v", found)
+		}
+		if !ids["x.partial"] || errText == "" {
+			t.Fatalf("partial results must be marked as incomplete: %+v err=%q", found, errText)
+		}
+	}
+}
+
+func TestHardTimeoutStopsAStuckCheck(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	chk := Check{ID: "x", Name: "x", Category: model.CatWeb, Timeout: 100 * time.Millisecond, Run: func(*Context) []model.Finding {
+		<-block
+		return nil
+	}}
+	start := time.Now()
+	found, _ := runOne(context.Background(), NewContext(context.Background(), Options{}), chk)
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("a stuck check must not hold up the scan")
+	}
+	if len(found) != 1 || found[0].Severity != model.Skipped {
+		t.Fatalf("a stuck check must be reported as not checked: %+v", found)
+	}
+}
+
+func TestFinishedCheckIsNotMarkedPartial(t *testing.T) {
+	chk := Check{ID: "x", Name: "x", Category: model.CatWeb, Timeout: time.Minute, Run: func(*Context) []model.Finding {
+		return []model.Finding{{ID: "ok", Severity: model.OK}}
+	}}
+	found, errText := runOne(context.Background(), NewContext(context.Background(), Options{}), chk)
+	if len(found) != 1 || errText != "" {
+		t.Fatalf("got %+v err=%q", found, errText)
+	}
+}
+
 func TestWantVerifyCoversRustCoreutils(t *testing.T) {
 	for _, path := range []string{
 		"/usr/bin/ssh", "/usr/sbin/sshd", "/usr/lib/openssh/sshd-session",
@@ -451,6 +597,8 @@ func TestIsUploadedPHP(t *testing.T) {
 		{"/var/www/html/vendor/acme/uploads/Manager.php", 900, false},
 		{"/var/www/app/Http/Controllers/Upload/Store.php", 900, false},
 		{"/var/www/html/images/logo.php", 900, false},
+		{"/var/www/app/public/uploads/shell.php", 900, true},
+		{"/var/www/admin/uploads/shell.php", 900, true},
 		{"/var/www/html/index.php", 900, false},
 	}
 	for _, c := range cases {

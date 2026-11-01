@@ -31,15 +31,11 @@ type webInstance struct {
 // what a security scan must not do, so the file is only ever read. A chunk
 // overlap keeps a match that straddles a buffer boundary intact.
 func binaryVersion(path string, re *regexp.Regexp) string {
-	f, err := os.Open(path)
+	f, err := fsx.OpenRegular(path)
 	if err != nil {
 		return ""
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil || !st.Mode().IsRegular() {
-		return ""
-	}
 	const chunk, overlap = 4 << 20, 128
 	buf := make([]byte, chunk)
 	carry := 0
@@ -289,7 +285,9 @@ func nginxConfigPaths(c *Context) []string {
 	var out []string
 	if procs, err := c.Procs(); err == nil {
 		for _, p := range procs {
-			if p.Comm != "nginx" || p.InContainer {
+			// Only root's nginx. A process name is free to choose, so any user could
+			// otherwise make this root scan open a path of their choosing.
+			if p.Comm != "nginx" || p.InContainer || p.UID != 0 {
 				continue
 			}
 			for i, a := range p.Cmdline {
@@ -354,7 +352,7 @@ func nginxUpstreamFindings(c *Context, instances []webInstance) []model.Finding 
 	const cat = model.CatWeb
 	title := "nginx advisory check"
 	if c.Opts.Offline {
-		return []model.Finding{skipped("web.nginx.upstream", cat, title, "Offline mode, so nginx.org advisories were not checked.")}
+		return []model.Finding{requested("web.nginx.upstream", cat, title, "Offline mode, so nginx.org advisories were not checked.")}
 	}
 	var page []byte
 	client := newHTTPClient(c.Opts.Proxy)
@@ -507,7 +505,7 @@ func phpUpstreamFindings(c *Context, instances []webInstance) []model.Finding {
 	const cat = model.CatWeb
 	title := "PHP version check"
 	if c.Opts.Offline {
-		return []model.Finding{skipped("web.php.upstream", cat, title, "Offline mode, so php.net was not checked.")}
+		return []model.Finding{requested("web.php.upstream", cat, title, "Offline mode, so php.net was not checked.")}
 	}
 	var data []byte
 	client := newHTTPClient(c.Opts.Proxy)
@@ -691,7 +689,7 @@ var uploadDirRe = regexp.MustCompile(`(?i)/(uploads?|attachments?|avatars?)/`)
 
 // Source trees use these directory names for code about uploads, which is not
 // the same as a directory users upload into.
-var codeDirRe = regexp.MustCompile(`(?i)/(vendor|plugins?|themes?|modules?|src|app|lib|libs|includes?|core|admin|classes|controllers?|components?)/`)
+var codeDirRe = regexp.MustCompile(`(?i)/(vendor|plugins?|themes?|modules?|src|lib|libs|includes?|core|classes|controllers?|components?)/`)
 
 // isUploadedPHP reports a PHP file sitting in an upload directory. WordPress and
 // others place a tiny index.php there to stop directory listing, so that is exempt.
@@ -722,25 +720,40 @@ func webRoots(c *Context) []string {
 			}
 		}
 	}
-	// Nested roots such as /var/www and /var/www/app would scan files twice.
-	unique := uniqueStrings(roots)
-	var out []string
-	for _, r := range unique {
+	// Resolve first. /var/www is often a symlink to a data disk, and a directory walk
+	// does not enter a symlinked root, so it would scan nothing and report a pass.
+	var resolved []string
+	for _, r := range roots {
 		r = filepath.Clean(r)
-		if !filepath.IsAbs(r) || r == "/" || strings.ContainsAny(r, "$") {
+		if !filepath.IsAbs(r) || strings.ContainsAny(r, "$") {
 			continue
 		}
-		nested := false
-		for _, other := range out {
-			if strings.HasPrefix(r, other+"/") || r == other {
-				nested = true
-			}
+		real, err := filepath.EvalSymlinks(r)
+		if err != nil || real == "/" {
+			continue
 		}
-		if st, err := os.Stat(r); !nested && err == nil && st.IsDir() {
+		if st, err := os.Stat(real); err == nil && st.IsDir() {
+			resolved = append(resolved, real)
+		}
+	}
+	// Nested roots such as /var/www and /var/www/app would scan files twice. The
+	// sorted order puts a parent before its children.
+	var out []string
+	for _, r := range uniqueStrings(resolved) {
+		if !coveredBy(r, out) {
 			out = append(out, r)
 		}
 	}
 	return out
+}
+
+func coveredBy(path string, roots []string) bool {
+	for _, root := range roots {
+		if path == root || inDirs(path, root) {
+			return true
+		}
+	}
+	return false
 }
 
 func checkWebshells(c *Context) []model.Finding {
@@ -753,8 +766,11 @@ func checkWebshells(c *Context) []model.Finding {
 	files := 0
 	incomplete := false
 	cutoff := time.Now().Add(-7 * 24 * time.Hour)
-	for _, root := range roots {
-		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	// Deployments often link a site or a "current" release out of the web root, so
+	// a symlink to a directory adds that directory to the scan.
+	const maxRoots = 64
+	for i := 0; i < len(roots) && i < maxRoots; i++ {
+		_ = filepath.WalkDir(roots[i], func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
@@ -763,8 +779,13 @@ func checkWebshells(c *Context) []model.Finding {
 				return filepath.SkipAll
 			}
 			if d.IsDir() {
-				if n := d.Name(); n == ".git" || n == "node_modules" {
-					return filepath.SkipDir
+				return nil
+			}
+			if d.Type()&fs.ModeSymlink != 0 {
+				if real, err := filepath.EvalSymlinks(path); err == nil && real != "/" && !inDirs(real, "/proc", "/sys", "/dev") && !coveredBy(real, roots) {
+					if st, err := os.Stat(real); err == nil && st.IsDir() {
+						roots = append(roots, real)
+					}
 				}
 				return nil
 			}
@@ -793,9 +814,7 @@ func checkWebshells(c *Context) []model.Finding {
 			if name == "eval-stdin.php" {
 				high = append(high, path+" (PHPUnit CVE-2017-9841, allows remote code execution)")
 			}
-			if info.Size() > 4<<20 {
-				return nil
-			}
+			// Large files are checked up to the limit rather than skipped.
 			b, err := fsx.ReadNoFollow(path, 4<<20)
 			if err != nil {
 				return nil

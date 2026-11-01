@@ -26,3 +26,14 @@ func TestParseSeverity(t *testing.T) {
 		t.Error("an unknown level must be rejected")
 	}
 }
+
+func TestOutputFailureNeverHidesCriticalFindings(t *testing.T) {
+	if got := failedOutput(2); got != 2 {
+		t.Errorf("critical findings must keep exit 2, got %d", got)
+	}
+	for _, code := range []int{0, 1, 3} {
+		if got := failedOutput(code); got != 74 {
+			t.Errorf("failedOutput(%d) = %d, want 74", code, got)
+		}
+	}
+}

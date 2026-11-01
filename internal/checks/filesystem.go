@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"ubuntu-sys-audit/internal/dpkg"
 	"ubuntu-sys-audit/internal/fsx"
 	"ubuntu-sys-audit/internal/model"
 )
@@ -31,8 +32,7 @@ var skipFSTypes = map[string]bool{
 var skipWalkDirs = map[string]bool{
 	"/proc": true, "/sys": true, "/snap": true, "/var/lib/docker": true, "/var/lib/containerd": true,
 	"/var/lib/kubelet": true, "/var/lib/lxd": true, "/var/lib/snapd": true, "/var/snap": true,
-	"/var/lib/containers": true, "/var/lib/libvirt/images": true, "/lost+found": true, "/mnt/mac": true,
-	"/opt/orbstack-guest": true,
+	"/var/lib/containers": true, "/var/lib/libvirt/images": true, "/lost+found": true,
 }
 
 // parseMountSkips returns mount points to avoid given /proc/self/mountinfo.
@@ -124,7 +124,7 @@ type walkResult struct {
 func checkFilesystem(c *Context) []model.Finding {
 	const cat = model.CatFilesystem
 	if c.Opts.SkipFS {
-		return []model.Finding{skipped("filesystem.walk", cat, "Filesystem scan", "Skipped by --skip-fs.")}
+		return []model.Finding{requested("filesystem.walk", cat, "Filesystem scan", "Skipped by --skip-fs.")}
 	}
 	if !c.Host.IsRoot {
 		return []model.Finding{needRoot("filesystem.walk", cat, "Filesystem scan")}
@@ -179,6 +179,13 @@ func checkFilesystem(c *Context) []model.Finding {
 	return filesystemFindings(&r)
 }
 
+// stockCapabilities recognizes packaged files that ship with powerful capabilities.
+// Ownership alone is not enough: setcap on a packaged python3 is a classic backdoor
+// and leaves the file's hash unchanged, so this has to name each path.
+func stockCapabilities(path string, owned bool) bool {
+	return owned && dpkg.NormalizePath(path) == "/usr/lib/snapd/snap-confine"
+}
+
 func inspectFile(c *Context, path string, info os.FileInfo, r *walkResult) {
 	mode := info.Mode()
 	name := filepath.Base(path)
@@ -202,6 +209,8 @@ func inspectFile(c *Context, path string, info os.FileInfo, r *walkResult) {
 			danger, any := parseFileCaps(buf[:n])
 			owned := c.Owned(path)
 			switch {
+			case stockCapabilities(path, owned):
+				r.capOwned++
 			case len(danger) > 0:
 				r.capDanger = append(r.capDanger, path+"  "+strings.Join(danger, ","))
 			case any && !owned:
@@ -211,7 +220,8 @@ func inspectFile(c *Context, path string, info os.FileInfo, r *walkResult) {
 			}
 		}
 	}
-	if inTemp(path) {
+	// Skip this tool's own binary, often copied to /tmp to run once.
+	if inTemp(path) && path != c.selfExe {
 		switch {
 		case isELF(path):
 			r.tempELF = append(r.tempELF, fmt.Sprintf("%s  %d bytes  %s", path, info.Size(), info.ModTime().Format("2006-01-02 15:04")))

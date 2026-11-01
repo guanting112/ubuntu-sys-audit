@@ -20,6 +20,12 @@ chmod +x ubuntu-sys-audit-linux-amd64
 sudo ./ubuntu-sys-audit-linux-amd64
 ```
 
+`SHA256SUMS` 和執行檔放在一起，只能抓出下載損毀。要確認執行檔確實由這個 repo 的 workflow 編譯（v0.1.3 之後的版本）：
+
+```sh
+gh attestation verify ubuntu-sys-audit-linux-amd64 -R guanting112/ubuntu-sys-audit
+```
+
 ARM 主機請把 `amd64` 換成 `arm64`。
 
 ### 批次掃描多台主機
@@ -40,7 +46,7 @@ ssh -t "$h" 'sudo ./ubuntu-sys-audit-linux-amd64 --json -o audit.json > /dev/nul
 scp "$h:audit.json" "audit-$h.json"
 ```
 
-報告權限是 0600，擁有者會設回執行 sudo 的使用者，所以 scp 可以直接取回。
+報告權限是 0600，擁有者會設回執行 sudo 的使用者，所以 scp 可以直接取回。`-o` 只會建立新檔案，舊報告要先刪除；在 sudo 底下，目錄也必須是執行 sudo 的使用者寫得進去的。
 
 結束代碼可以直接用來判斷：
 
@@ -49,6 +55,7 @@ scp "$h:audit.json" "audit-$h.json"
 | 0 | 沒有待處理項目 |
 | 1 | 有中等級項目 |
 | 2 | 有嚴重或高等級項目 |
+| 3 | 掃描不完整：有項目未能檢查，不要當成主機沒問題 |
 | 130 | 掃描被中止 |
 
 ### 選項
@@ -57,8 +64,8 @@ scp "$h:audit.json" "audit-$h.json"
 | --- | --- |
 | `--json` | 輸出 JSON 到 stdout，不開 TUI |
 | `--text` | 輸出純文字到 stdout，不開 TUI |
-| `--min-severity LV` | 純文字模式只列出此等級以上（預設 `medium`） |
-| `-o, --output FILE` | 另外把 JSON 報告存到 FILE（權限 0600） |
+| `--min-severity LV` | 純文字模式只列出此等級以上（預設 `medium`）。未能檢查的項目一律會列出 |
+| `-o, --output FILE` | 另外把 JSON 報告存成新檔案 FILE（權限 0600），不會覆寫既有檔案 |
 | `--offline` | 不連網。沒有指定 `--oval-file` 時，不比對 CVE |
 | `--oval-file PATH` | 使用本機的 OVAL 檔（`.xml` 或 `.xml.bz2`） |
 | `--proxy URL` | 下載公告資料時使用的 HTTP proxy |
@@ -98,12 +105,12 @@ scp "$h:audit.json" "audit-$h.json"
 
 **對生產環境溫和。** 工具會把執行緒調成低 CPU 優先權與 idle I/O，並限制最多使用 2 個 CPU。測試時多數掃描在 5 到 60 秒內完成，下載 OVAL 較慢時最久約 2.5 分鐘；測試用容器的檔案不多，檔案很多的主機在全機掃描上會花更久（上限見 `--fs-timeout`）。
 
-**防範來自主機的惡意內容。** 拒絕跟隨使用者目錄內的 symlink、不會被 FIFO 卡住；process 名稱與檔名內的終端機控制字元會被轉義；指令列與設定內的密碼會被遮罩；`/etc/shadow` 的雜湊讀取後立即丟棄，只保留狀態與演算法。
+**防範來自主機的惡意內容。** 不會跟著 symlink 讀取使用者可控制的檔案：家目錄裡的連結只會回報，不會讀取；FIFO 和裝置檔不會被開啟。主機資訊、process 名稱與檔名內的終端機控制字元會被轉義。`/etc/passwd` 和 `/etc/shadow` 的密碼雜湊讀取後立即丟棄，只保留狀態與演算法。指令列與設定內常見形式的帳密會被遮罩，但無法涵蓋所有寫法，報告仍要當成敏感資料保管。
 
 ## 使用限制
 
 - **未發現異常不代表主機乾淨。** 如果 kernel 已被 rootkit 控制，本機工具看到的結果都可能被竄改。隱藏程序與隱藏模組的檢查能抓到常見手法，抓不到全部。懷疑遭入侵時，請從乾淨媒體開機做離線鑑識。
-- **未檢查不等於通過。** 權限不足、逾時或連不上網路的項目會標示「Not checked」（JSON 內是 `skipped`），不會算成通過。
+- **未檢查不等於通過。** 權限不足、逾時或連不上網路的項目會標示「Not checked」（JSON 內是 `skipped`），不會算成通過；沒有嚴重或高等級項目時，結束代碼會是 3。檢查逾時也會保留已找到的結果。
 - **USN 只涵蓋 Ubuntu 已發布修補的漏洞與 apt 套件。** 還沒有修補的 CVE、snap、pip、npm、容器映像內的套件都不在比對範圍內。
 - **雜湊比對的基準是本機 dpkg 資料庫。** 攻擊者若連資料庫一起改，這項就驗不出來。
 - **webshell 檢查是特徵比對。** 能抓到常見樣本，抓不到客製或混淆過的版本。

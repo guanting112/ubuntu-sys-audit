@@ -65,17 +65,26 @@ func checkUsers(c *Context) []model.Finding {
 	summary.Focus = true
 	out := []model.Finding{summary}
 
-	var uid0, gid0, sysLogin, webLogin []string
+	versions := c.PackageVersions()
+	var uid0, gid0, sysLogin, webLogin, passwdEmpty, passwdHash []string
 	uidSeen := map[int][]string{}
 	for _, u := range users {
 		uidSeen[u.UID] = append(uidSeen[u.UID], u.Name)
+		// pam_unix reads this field before /etc/shadow, so a value here is a
+		// working password whatever shadow says. It is a classic backdoor.
+		switch u.Password {
+		case "empty":
+			passwdEmpty = append(passwdEmpty, fmt.Sprintf("%s  uid=%d  shell=%s", u.Name, u.UID, u.Shell))
+		case "inline":
+			passwdHash = append(passwdHash, fmt.Sprintf("%s  uid=%d  shell=%s", u.Name, u.UID, u.Shell))
+		}
 		if u.UID == 0 && u.Name != "root" {
 			uid0 = append(uid0, fmt.Sprintf("%s  shell=%s  home=%s", u.Name, u.Shell, u.Home))
 		}
 		if u.GID == 0 && u.UID != 0 && u.Name != "sync" {
 			gid0 = append(gid0, u.Name)
 		}
-		if u.UID > 0 && u.UID < min && isLoginShell(u.Shell) {
+		if u.UID > 0 && u.UID < min && isLoginShell(u.Shell) && !stockServiceShell(u, versions) {
 			line := fmt.Sprintf("%s  uid=%d  shell=%s", u.Name, u.UID, u.Shell)
 			if isServiceAccount(u.Name) {
 				webLogin = append(webLogin, line)
@@ -83,6 +92,20 @@ func checkUsers(c *Context) []model.Finding {
 				sysLogin = append(sysLogin, line)
 			}
 		}
+	}
+	if len(passwdEmpty) > 0 {
+		f := finding("accounts.passwd_empty", cat, model.Critical, fmt.Sprintf("Accounts with an empty password field in /etc/passwd (%d)", len(passwdEmpty)))
+		f.Detail = "These accounts may log in with no password at all, and /etc/shadow is not consulted for them."
+		f.Evidence = passwdEmpty
+		f.Remediation = "Set the field to x and manage the password in /etc/shadow, or lock the account. Treat the host as compromised if you did not do this."
+		out = append(out, f)
+	}
+	if len(passwdHash) > 0 {
+		f := finding("accounts.passwd_hash", cat, model.Critical, fmt.Sprintf("Accounts with a password hash in /etc/passwd (%d)", len(passwdHash)))
+		f.Detail = "Ubuntu keeps hashes in /etc/shadow. A hash in the world-readable /etc/passwd overrides it, and is a classic way to add a backdoor password."
+		f.Evidence = passwdHash
+		f.Remediation = "Set the field to x. Treat the host as compromised if you did not do this."
+		out = append(out, f)
 	}
 	if len(uid0) > 0 {
 		f := finding("accounts.uid0", cat, model.Critical, fmt.Sprintf("UID 0 accounts other than root (%d)", len(uid0)))
@@ -130,7 +153,14 @@ func checkUsers(c *Context) []model.Finding {
 		}
 		return append(out, skipped("accounts.shadow", cat, "Password status", "Cannot read /etc/shadow: "+shadowErr.Error()))
 	}
-	return append(out, shadowFindings(c, users, shadow, min)...)
+	return append(out, shadowFindings(c, users, shadow, min, len(passwdEmpty) > 0)...)
+}
+
+// stockServiceShell recognizes the login shell a package gives its own account.
+// postgresql-common creates postgres with /bin/bash, so flagging it would raise an
+// alert on every database host.
+func stockServiceShell(u User, versions map[string][]string) bool {
+	return u.Name == "postgres" && u.Shell == "/bin/bash" && len(versions["postgresql-common"]) > 0
 }
 
 func passwordLabel(e ShadowEntry) string {
@@ -151,7 +181,7 @@ func isServiceAccount(name string) bool {
 	return false
 }
 
-func shadowFindings(c *Context, users []User, shadow map[string]ShadowEntry, min int) []model.Finding {
+func shadowFindings(c *Context, users []User, shadow map[string]ShadowEntry, min int, passwdEmpty bool) []model.Finding {
 	const cat = model.CatAccounts
 	var out []model.Finding
 	var empty, weak, sysPw, recent []string
@@ -181,7 +211,7 @@ func shadowFindings(c *Context, users []User, shadow map[string]ShadowEntry, min
 		f.Evidence = empty
 		f.Remediation = "Lock with passwd -l <account>, or set a strong password."
 		out = append(out, f)
-	} else {
+	} else if !passwdEmpty {
 		out = append(out, finding("accounts.empty_password", cat, model.OK, "No accounts with an empty password"))
 	}
 	if len(weak) > 0 {
@@ -248,7 +278,14 @@ func checkPrivilege(c *Context) []model.Finding {
 		readable++
 		for _, line := range strings.Split(string(b), "\n") {
 			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "Defaults") {
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if strings.HasPrefix(line, "Defaults") {
+				// Same effect as NOPASSWD, but for every rule it applies to.
+				if strings.Contains(line, "!authenticate") {
+					nopass = append(nopass, p+": "+line)
+				}
 				continue
 			}
 			if !strings.Contains(line, "NOPASSWD") {
@@ -464,8 +501,10 @@ func checkLogins(c *Context) []model.Finding {
 		if !c.Host.IsRoot {
 			return append(out, needRoot("accounts.authlog", cat, "SSH login history"))
 		}
-		out = append(out, skipped("accounts.authlog", cat, "SSH login history", "/var/log/auth.log not found. This host may use journald only. Use journalctl -u ssh instead."))
-		return out
+		// Normal on hosts that log only to journald, so this is not a failed check.
+		f := finding("accounts.authlog", cat, model.Info, "SSH login history not available from auth.log")
+		f.Detail = "/var/log/auth.log not found. This host may use journald only. Use journalctl -u ssh instead."
+		return append(out, f)
 	}
 	acceptedBy := map[string]int{}
 	failedFrom := map[string]int{}

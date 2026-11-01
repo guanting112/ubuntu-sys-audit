@@ -18,6 +18,12 @@ chmod +x ubuntu-sys-audit-linux-amd64
 sudo ./ubuntu-sys-audit-linux-amd64
 ```
 
+`SHA256SUMS` only catches a corrupted download, because it sits next to the binaries. To confirm a binary was built by this repository's workflow, for releases after v0.1.3:
+
+```sh
+gh attestation verify ubuntu-sys-audit-linux-amd64 -R guanting112/ubuntu-sys-audit
+```
+
 On ARM hosts, replace `amd64` with `arm64`.
 
 ### Scanning multiple hosts
@@ -38,7 +44,7 @@ ssh -t "$h" 'sudo ./ubuntu-sys-audit-linux-amd64 --json -o audit.json > /dev/nul
 scp "$h:audit.json" "audit-$h.json"
 ```
 
-The report has mode 0600 and its owner is set back to the user who ran sudo, so scp can fetch it directly.
+The report has mode 0600 and its owner is set back to the user who ran sudo, so scp can fetch it directly. `-o` only creates new files, so remove an old report first. Under sudo, the directory must be one the invoking user can write to.
 
 Use the exit code to decide what to do next:
 
@@ -47,6 +53,7 @@ Use the exit code to decide what to do next:
 | 0 | Nothing to act on |
 | 1 | Medium findings |
 | 2 | Critical or high findings |
+| 3 | Scan incomplete: some items could not be checked, so do not treat the host as clean |
 | 130 | Scan was aborted |
 
 ### Options
@@ -55,8 +62,8 @@ Use the exit code to decide what to do next:
 | --- | --- |
 | `--json` | Write JSON to stdout without opening the TUI |
 | `--text` | Write plain text to stdout without opening the TUI |
-| `--min-severity LV` | In text mode, list only this level and above: `critical`, `high`, `medium`, `info`, `ok`, `skipped` (default `medium`) |
-| `-o, --output FILE` | Also save the JSON report to FILE (mode 0600) |
+| `--min-severity LV` | In text mode, list only this level and above: `critical`, `high`, `medium`, `info`, `ok` (default `medium`). Items that could not be checked are always listed |
+| `-o, --output FILE` | Also save the JSON report to a new FILE (mode 0600). An existing file is never overwritten |
 | `--offline` | Do not use the network. CVEs are not checked unless `--oval-file` is given |
 | `--oval-file PATH` | Use a local OVAL file (`.xml` or `.xml.bz2`) |
 | `--proxy URL` | HTTP proxy for downloading advisory data |
@@ -97,12 +104,12 @@ Known exception: when the tool reads BPF filters, the kernel may automatically l
 
 **Gentle on production.** The tool lowers its threads to low CPU priority and idle I/O, and uses at most 2 CPUs. In testing, most scans finished within 5 to 60 seconds, and the slowest took about 2.5 minutes when the OVAL download was slow. The test containers hold few files, so the full filesystem scan will take longer on hosts with many files (see `--fs-timeout` for the limit).
 
-**Defends against hostile content on the host.** It refuses to follow symlinks in user directories and cannot be hung by a FIFO. Terminal control characters in process names and file names are escaped. Passwords in command lines and configuration are masked. Hashes from `/etc/shadow` are discarded immediately after reading, keeping only the account status and algorithm.
+**Defends against hostile content on the host.** It does not follow symlinks into files users control: a link inside a home directory is reported, not read. FIFOs and devices are refused without being opened. Terminal control characters in host details, process names and file names are escaped. Password hashes from `/etc/passwd` and `/etc/shadow` are discarded on reading, keeping only the account status and algorithm. Common forms of credentials in command lines and configuration are masked, but this cannot catch every form, so treat reports as sensitive.
 
 ## Limitations
 
 - **A clean result does not prove a clean host.** If a rootkit controls the kernel, anything a local tool sees may be falsified. The hidden process and hidden module checks catch common techniques, not all of them. If you suspect a compromise, boot from clean media and perform offline forensics.
-- **Not checked does not mean passed.** Items that lacked permission, timed out or could not reach the network are shown as "Not checked" (`skipped` in JSON) and never count as passed.
+- **Not checked does not mean passed.** Items that lacked permission, timed out or could not reach the network are shown as "Not checked" (`skipped` in JSON), never count as passed, and make the exit code 3 unless there are critical or high findings. A check that runs out of time keeps what it already found.
 - **USN data covers only vulnerabilities Ubuntu has already fixed, and only apt packages.** Unpatched CVEs and packages from snap, pip, npm or container images are out of scope.
 - **Hash checks trust the local dpkg database.** An attacker who also modifies the database will not be detected by this check.
 - **Webshell detection is signature based.** It catches common samples, not customized or obfuscated ones.

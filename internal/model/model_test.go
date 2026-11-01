@@ -33,13 +33,28 @@ func TestRedactMasksCredentials(t *testing.T) {
 		{`password: "two words"`, "two words"},
 		{"root:$6$abcdefgh$AAAABBBBCCCCDDDD:19000", "AAAABBBBCCCCDDDD"},
 		{"root:$y$j9T$saltsalt$hashhashhash:19000", "hashhashhash"},
+		{"0 1 * * * mysqldump -uroot -pS3CRET1 db", "S3CRET1"},
+		{"/usr/bin/mysql --user=root -pS3CRET2", "S3CRET2"},
+		{"PGPASSWORD=S3CRET3 pg_dump x", "S3CRET3"},
+		{"DBPASS=S3CRET4 ./run", "S3CRET4"},
+		{"MYSQL_PWD=S3CRET5 mysql", "S3CRET5"},
+		{"curl -u admin:S3CRET6 http://h/", "S3CRET6"},
+		{"curl --user admin:S3CRET7 http://h/", "S3CRET7"},
+		{`curl -H "Authorization: Bearer S3CRET8" http://h/`, "S3CRET8"},
+		{"sshpass -p S3CRET9 ssh host", "S3CRET9"},
+		{"redis-cli -h db -a S3CRETA ping", "S3CRETA"},
+		{`{"password": "S3CRETB"}`, "S3CRETB"},
 	}
 	for _, c := range cases {
 		if got := Redact(c.in); strings.Contains(got, c.leak) {
 			t.Errorf("Redact(%q) = %q still contains %q", c.in, got, c.leak)
 		}
 	}
-	for _, benign := range []string{"nginx: worker process", "www-data ALL=(ALL) NOPASSWD:ALL", "PasswordAuthentication no"} {
+	for _, benign := range []string{
+		"nginx: worker process", "www-data ALL=(ALL) NOPASSWD:ALL", "PasswordAuthentication no",
+		"Cannot read /etc/passwd: permission denied", "ssh -p 2222 host", "mkdir -p /var/tmp/x",
+		"alice  uid=1000  shell=/bin/bash  password locked", "curl -fsSL https://example.com/a",
+	} {
 		if got := Redact(benign); got != benign {
 			t.Errorf("Redact changed benign text: %q -> %q", benign, got)
 		}
@@ -63,21 +78,29 @@ func TestCleanFindingFlattensSingleLineFields(t *testing.T) {
 }
 
 func TestExitCode(t *testing.T) {
-	r := Report{Findings: []Finding{{Severity: Info}, {Severity: OK}, {Severity: Skipped}}}
-	r.Finalize()
-	if r.ExitCode() != 0 {
-		t.Errorf("info/ok/skipped should exit 0, got %d", r.ExitCode())
+	cases := []struct {
+		name     string
+		findings []Finding
+		want     int
+	}{
+		{"clean", []Finding{{Severity: Info}, {Severity: OK}}, 0},
+		{"skipped because the operator asked", []Finding{{Severity: OK}, {Severity: Skipped, Requested: true}}, 0},
+		{"medium", []Finding{{Severity: Medium}}, 1},
+		{"medium and a requested skip", []Finding{{Severity: Medium}, {Severity: Skipped, Requested: true}}, 1},
+		{"could not check", []Finding{{Severity: OK}, {Severity: Skipped}}, 3},
+		{"incomplete outranks medium", []Finding{{Severity: Medium}, {Severity: Skipped}}, 3},
+		{"high outranks incomplete", []Finding{{Severity: High}, {Severity: Skipped}}, 2},
+		{"critical", []Finding{{Severity: Critical}}, 2},
 	}
-	r.Findings = append(r.Findings, Finding{Severity: Medium})
-	r.Finalize()
-	if r.ExitCode() != 1 {
-		t.Errorf("medium should exit 1, got %d", r.ExitCode())
+	for _, c := range cases {
+		r := Report{Findings: c.findings}
+		r.Finalize()
+		if got := r.ExitCode(); got != c.want {
+			t.Errorf("%s: exit %d, want %d", c.name, got, c.want)
+		}
 	}
-	r.Findings = append(r.Findings, Finding{Severity: High})
+	r := Report{Findings: []Finding{{Severity: Info}, {Severity: High}}}
 	r.Finalize()
-	if r.ExitCode() != 2 {
-		t.Errorf("high should exit 2, got %d", r.ExitCode())
-	}
 	if r.Findings[0].Severity != High {
 		t.Errorf("findings not sorted by severity: %+v", r.Findings[0])
 	}

@@ -25,10 +25,12 @@ func ownerLabel(view *procinfo.NetView, ino uint64) string {
 	return "(no owner found)"
 }
 
-// trustedExe requires the binary to belong to a package or a container, since
-// a process name alone is attacker controlled.
+// trustedExe requires the binary to belong to a package or a container, since a
+// process name alone is attacker controlled. A deleted binary at a package's path
+// still counts: that is a service not restarted after an upgrade, which is
+// reported on its own as a stale binary.
 func trustedExe(c *Context, p *procinfo.Process) bool {
-	if p == nil || p.Exe == "" || p.ExeDeleted {
+	if p == nil || p.Exe == "" {
 		return false
 	}
 	return p.InContainer || c.Owned(p.Exe)
@@ -39,6 +41,7 @@ var dnsDaemons = map[string]bool{
 	"dnsmasq": true, "pdns_server": true, "pdns_recursor": true, "nsd": true, "knotd": true,
 	"coredns": true, "pihole-FTL": true, "dnscrypt-proxy": true, "AdGuardHome": true,
 	"kube-dns": true, "stubby": true, "dnsdist": true, "maradns": true, "bind9": true, "lxd": true,
+	"docker-proxy": true,
 }
 
 func isStubAddress(a netip.Addr) bool {
@@ -67,8 +70,12 @@ func classifyDNS(c *Context, s procinfo.Socket, p *procinfo.Process) (model.Seve
 			return model.High, "A non-DNS program inside a container holds port 53"
 		}
 		return model.Critical, "Listening on port 53 but not a known DNS service"
+	case p.ExeDeleted && !trustedExe(c, p), inTemp(p.Exe):
+		return model.Critical, "Named like a DNS service, but its binary was deleted or runs from a temp directory"
 	case !trustedExe(c, p):
-		return model.Critical, "Named like a DNS service, but its binary belongs to no package or has been deleted"
+		// Pi-hole and AdGuard Home are usually installed this way, so this needs
+		// a look rather than an alarm.
+		return model.High, "Named like a DNS service, but its binary belongs to no package. Confirm you installed it"
 	case isStubAddress(s.LocalIP) && (name == "systemd-resolved" || name == "systemd-resolve"):
 		return model.OK, "The local stub of systemd-resolved, which is normal"
 	case s.LocalIP.IsLoopback():
@@ -240,7 +247,7 @@ func checkListeners(c *Context) []model.Finding {
 			if c.Host.IsRoot && s.HostNS && !c.Host.InContainer && !kernelPorts[s.LocalPort] {
 				orphan = append(orphan, line)
 			}
-		} else if p.ExeDeleted || inTemp(p.Exe) {
+		} else if inTemp(p.Exe) || (p.ExeDeleted && !trustedExe(c, p)) {
 			badOwner = append(badOwner, line)
 		} else if isPublic && c.Host.IsRoot && !trustedExe(c, p) && p.Exe != "" {
 			unmanaged = append(unmanaged, line)
@@ -389,7 +396,9 @@ func checkRawSockets(c *Context) []model.Finding {
 		out = append(out, finding("network.packet_none", cat, model.OK, "No packet sockets"))
 	}
 	if filterErr != "" {
-		out = append(out, skipped("network.bpf_filters", cat, "BPF filter contents", filterErr+". Packet sockets and owners are still listed, but BPFDoor magic values were not checked."))
+		f := skipped("network.bpf_filters", cat, "BPF filter contents", filterErr+". Packet sockets and owners are still listed, but BPFDoor magic values were not checked.")
+		f.Requested = c.Opts.NoNetlink
+		out = append(out, f)
 	} else if moduleLoaded {
 		f := finding("network.packet_diag", cat, model.Info, "The kernel auto-loaded packet_diag while BPF filters were read")
 		f.Detail = "Same effect as running ss -0. To avoid it, use --no-netlink."

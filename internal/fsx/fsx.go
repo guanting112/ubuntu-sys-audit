@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -16,23 +17,84 @@ var ErrNotRegular = errors.New("not a regular file")
 // DefaultLimit bounds how much of a config file is read.
 const DefaultLimit = 4 << 20
 
-func read(path string, limit int64, flags int) ([]byte, error) {
-	// O_NONBLOCK keeps a FIFO planted by a local user from hanging a root
-	// scan at open(); the file type is then checked on the opened descriptor,
-	// so there is no gap between check and read.
-	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC|flags, 0)
+// oPath is O_PATH, missing from the frozen syscall package. It has this value on
+// amd64 and arm64, the only architectures the tool is built for.
+const oPath = 0x200000
+
+// reopenRegular turns an O_PATH descriptor into a readable file if, and only if,
+// it refers to a regular file, and closes it either way.
+//
+// The type is checked before anything is really opened. Opening has side effects
+// on special files: a FIFO blocks, and opening /dev/watchdog arms the watchdog.
+// Reopening through /proc/self/fd reads the inode already checked, so swapping
+// the path in between changes nothing.
+func reopenRegular(pathFD int, path string) (*os.File, error) {
+	defer syscall.Close(pathFD)
+	var st syscall.Stat_t
+	if err := syscall.Fstat(pathFD, &st); err != nil {
+		return nil, &os.PathError{Op: "stat", Path: path, Err: err}
+	}
+	if st.Mode&syscall.S_IFMT != syscall.S_IFREG {
+		return nil, &os.PathError{Op: "read", Path: path, Err: ErrNotRegular}
+	}
+	fd, err := syscall.Open("/proc/self/fd/"+strconv.Itoa(pathFD), syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, &os.PathError{Op: "open", Path: path, Err: err}
 	}
-	f := os.NewFile(uintptr(fd), path)
-	defer f.Close()
-	st, err := f.Stat()
+	return os.NewFile(uintptr(fd), path), nil
+}
+
+func openRegular(path string, flags int) (*os.File, error) {
+	pathFD, err := syscall.Open(path, oPath|syscall.O_CLOEXEC|flags, 0)
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: path, Err: err}
+	}
+	return reopenRegular(pathFD, path)
+}
+
+// OpenRegular opens a file for reading, following symlinks, and refuses anything
+// but a regular file without touching it.
+func OpenRegular(path string) (*os.File, error) {
+	return openRegular(path, 0)
+}
+
+func read(path string, limit int64, flags int) ([]byte, error) {
+	f, err := openRegular(path, flags)
 	if err != nil {
 		return nil, err
 	}
-	if !st.Mode().IsRegular() {
-		return nil, &os.PathError{Op: "read", Path: path, Err: ErrNotRegular}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, limit))
+}
+
+// ReadUnder reads rel below base and refuses a symlink in any component of rel.
+// O_NOFOLLOW alone covers only the last one, so ~/.ssh -> /root/.ssh would get
+// past it. Use this for anything inside a home directory. base itself is trusted
+// and may be a symlink, as a home directory set in /etc/passwd can be.
+func ReadUnder(base, rel string, limit int64) ([]byte, error) {
+	dir, err := syscall.Open(base, oPath|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: base, Err: err}
 	}
+	parts := strings.Split(rel, "/")
+	for _, part := range parts[:len(parts)-1] {
+		next, err := syscall.Openat(dir, part, oPath|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+		syscall.Close(dir)
+		if err != nil {
+			return nil, &os.PathError{Op: "open", Path: base + "/" + rel, Err: err}
+		}
+		dir = next
+	}
+	last, err := syscall.Openat(dir, parts[len(parts)-1], oPath|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	syscall.Close(dir)
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: base + "/" + rel, Err: err}
+	}
+	f, err := reopenRegular(last, base+"/"+rel)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
 	return io.ReadAll(io.LimitReader(f, limit))
 }
 
@@ -71,18 +133,14 @@ func ProcString(path string) string {
 // Tail returns up to limit bytes from the end of a regular file, starting at a
 // line boundary when the file was truncated.
 func Tail(path string, limit int64) ([]byte, error) {
-	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
+	f, err := openRegular(path, syscall.O_NOFOLLOW)
 	if err != nil {
-		return nil, &os.PathError{Op: "open", Path: path, Err: err}
+		return nil, err
 	}
-	f := os.NewFile(uintptr(fd), path)
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
 		return nil, err
-	}
-	if !st.Mode().IsRegular() {
-		return nil, &os.PathError{Op: "read", Path: path, Err: ErrNotRegular}
 	}
 	offset := st.Size() - limit
 	truncated := offset > 0

@@ -70,6 +70,8 @@ func argv0Base(p *procinfo.Process) string {
 	return strings.TrimLeft(first[strings.LastIndexByte(first, '/')+1:], "-@")
 }
 
+var multiCallBinaries = map[string]bool{"busybox": true, "toybox": true}
+
 // argv0IsAlias reports whether argv[0] legitimately names the running binary by
 // another path. Multi-call binaries do this: from 22.04 on,
 // /lib/systemd/systemd-udevd is a symlink to /usr/bin/udevadm, so every host
@@ -80,6 +82,11 @@ func argv0IsAlias(c *Context, p *procinfo.Process) bool {
 	}
 	argv0 := strings.Fields(p.Cmdline[0] + " x")[0]
 	if p.InContainer {
+		// Alpine and other small images run everything through one binary, so
+		// crond's executable really is busybox there.
+		if multiCallBinaries[base(p.Exe)] {
+			return true
+		}
 		// The host's dpkg database says nothing about a container's files, so
 		// all that can be checked is that the path is the running binary.
 		return pathIsProcessExe(p.PID, argv0)
@@ -135,6 +142,7 @@ func checkProcesses(c *Context) []model.Finding {
 		}
 	}
 
+	self := os.Getpid()
 	var fakeKernel, masquerade, tempExe, contTempExe, memfd, deletedExe, hidden, unmanaged, miners, revShell, webShell, preload []string
 	user := 0
 	for _, p := range procs {
@@ -142,6 +150,10 @@ func checkProcesses(c *Context) []model.Finding {
 			continue
 		}
 		user++
+		// This scan itself, often copied to /tmp to run once.
+		if p.PID == self {
+			continue
+		}
 		line := p.Label()
 		if cmd := p.CmdlineString(); cmd != "" {
 			line += "  command: " + cmd

@@ -179,6 +179,35 @@ func TestProOnlyFixIsFlagged(t *testing.T) {
 	}
 }
 
+func TestFeedRelease(t *testing.T) {
+	doc := `<oval_definitions xmlns="x"><definitions><definition id="oval:com.ubuntu.noble:def:100" class="inventory"><metadata><title>x</title></metadata></definition></definitions></oval_definitions>`
+	f, err := Parse(strings.NewReader(doc), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Release != "noble" {
+		t.Errorf("release = %q", f.Release)
+	}
+	empty, err := Parse(strings.NewReader(`<oval_definitions xmlns="x"><definitions></definitions></oval_definitions>`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Release != "" || empty.DefinitionCount() != 0 {
+		t.Errorf("empty feed: %+v", empty)
+	}
+}
+
+func TestKernelRecognized(t *testing.T) {
+	f := parseSample(t)
+	for rel, want := range map[string]bool{
+		"5.15.0-25-generic": true, "5.15.0-1004-aws": true, "6.8.0-1-orbstack": false, "6.12.1-mainline": false,
+	} {
+		if got := f.KernelRecognized(rel); got != want {
+			t.Errorf("KernelRecognized(%q) = %v, want %v", rel, got, want)
+		}
+	}
+}
+
 func TestParseRejectsWrongDocument(t *testing.T) {
 	if _, err := Parse(strings.NewReader("<html><body>blocked by proxy</body></html>"), false); err == nil {
 		t.Error("a captive portal page must not parse as an empty feed")

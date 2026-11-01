@@ -6,7 +6,9 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -82,6 +84,10 @@ func Origin(version string) string {
 	switch {
 	case strings.Contains(v, "deb.sury.org"):
 		return "ondrej-ppa"
+	case strings.Contains(v, "ppa"):
+		// Other PPAs often have "ubuntu" in the version too, as in
+		// 1.2-1ubuntu1~ppa1, but USNs do not cover what they ship.
+		return "third-party"
 	case strings.Contains(v, "ubuntu"), strings.Contains(v, "build"):
 		return "ubuntu"
 	case nginxOrgVersion.MatchString(v):
@@ -173,26 +179,42 @@ func (o *Owners) Owned(path string) bool {
 	return ok
 }
 
-// Mismatch is a package file whose content differs from the recorded hash.
+// Mismatch is a package file that is no longer what the package installed.
 type Mismatch struct {
 	Path    string
 	Package string
+	// LinkTarget is set when a regular file was replaced by a symlink.
+	LinkTarget string
 }
 
 // VerifyResult summarizes an integrity run.
 type VerifyResult struct {
 	Checked    int
 	Mismatches []Mismatch
+	Missing    []Mismatch
+	Unreadable int
 	Incomplete bool
 }
 
+// fsRoot and infoDir let tests point verification at a fake filesystem.
+var (
+	fsRoot  = ""
+	infoDir = InfoDir
+)
+
 // Verify hashes package files accepted by want and compares them against the
-// package's md5sums file. This catches binaries swapped on disk, the classic
-// way to hide from ps, ss and friends. Files absent from disk are ignored:
-// minimal images strip many of them legitimately.
+// package's md5sums file. This catches binaries swapped on disk, the classic way
+// to hide from ps, ss and friends.
+//
+// md5sums only lists regular files, so a symlink at that path means the file was
+// replaced. Missing files are reported separately: an admin may have removed a
+// tool on purpose, but it is also how a file ends up replaced and hidden.
+//
+// The recorded path is tried first. /usr is not merged on 18.04 and some upgraded
+// hosts, so /bin/ps exists there while /usr/bin/ps does not.
 func Verify(ctx context.Context, owners *Owners, want func(path string) bool) (VerifyResult, error) {
 	var res VerifyResult
-	sums, err := filepath.Glob(InfoDir + "/*.md5sums")
+	sums, err := filepath.Glob(infoDir + "/*.md5sums")
 	if err != nil {
 		return res, err
 	}
@@ -200,6 +222,7 @@ func Verify(ctx context.Context, owners *Owners, want func(path string) bool) (V
 		return res, os.ErrNotExist
 	}
 	seen := map[string]struct{}{}
+	realDirs := map[string]string{}
 	for _, sumFile := range sums {
 		pkg := strings.TrimSuffix(filepath.Base(sumFile), ".md5sums")
 		b, err := os.ReadFile(sumFile)
@@ -211,8 +234,8 @@ func Verify(ctx context.Context, owners *Owners, want func(path string) bool) (V
 				continue
 			}
 			sum, rel := string(line[:32]), strings.TrimSpace(string(line[33:]))
-			path := "/" + rel
-			norm := NormalizePath(path)
+			recorded := "/" + rel
+			norm := NormalizePath(recorded)
 			if !want(norm) {
 				continue
 			}
@@ -221,36 +244,71 @@ func Verify(ctx context.Context, owners *Owners, want func(path string) bool) (V
 					continue
 				}
 			}
-			if _, dup := seen[norm]; dup {
+			path, info, statErr := locate(recorded, norm)
+			key := realPath(path, realDirs)
+			if _, dup := seen[key]; dup {
 				continue
 			}
-			seen[norm] = struct{}{}
+			seen[key] = struct{}{}
 			if ctx.Err() != nil {
 				res.Incomplete = true
 				return res, nil
 			}
-			got, err := md5File(norm)
-			if err != nil {
-				continue
-			}
-			res.Checked++
-			if got != sum {
-				res.Mismatches = append(res.Mismatches, Mismatch{Path: norm, Package: pkg})
+			switch {
+			case errors.Is(statErr, fs.ErrNotExist):
+				res.Missing = append(res.Missing, Mismatch{Path: path, Package: pkg})
+			case statErr != nil:
+				res.Unreadable++
+			case info.Mode()&fs.ModeSymlink != 0:
+				target, _ := os.Readlink(fsRoot + path)
+				res.Mismatches = append(res.Mismatches, Mismatch{Path: path, Package: pkg, LinkTarget: target})
+			case !info.Mode().IsRegular():
+				res.Mismatches = append(res.Mismatches, Mismatch{Path: path, Package: pkg, LinkTarget: "a " + info.Mode().Type().String() + " special file"})
+			default:
+				got, err := md5File(fsRoot + path)
+				if err != nil {
+					res.Unreadable++
+					continue
+				}
+				res.Checked++
+				if got != sum {
+					res.Mismatches = append(res.Mismatches, Mismatch{Path: path, Package: pkg})
+				}
 			}
 		}
 	}
 	return res, nil
 }
 
+// locate finds a package file at its recorded path, or at the merged /usr path.
+func locate(recorded, norm string) (string, fs.FileInfo, error) {
+	info, err := os.Lstat(fsRoot + recorded)
+	if err == nil || recorded == norm || !errors.Is(err, fs.ErrNotExist) {
+		return recorded, info, err
+	}
+	if info, err := os.Lstat(fsRoot + norm); err == nil || !errors.Is(err, fs.ErrNotExist) {
+		return norm, info, err
+	}
+	return recorded, nil, err
+}
+
+// realPath resolves the directory part only, so /bin/ps and /usr/bin/ps count as
+// one file on merged systems while a symlink at the path itself stays visible.
+func realPath(path string, cache map[string]string) string {
+	dir, name := filepath.Split(path)
+	real, ok := cache[dir]
+	if !ok {
+		var err error
+		if real, err = filepath.EvalSymlinks(fsRoot + dir); err != nil {
+			real = fsRoot + dir
+		}
+		cache[dir] = real
+	}
+	return filepath.Join(real, name)
+}
+
 func md5File(path string) (string, error) {
-	st, err := os.Lstat(path)
-	if err != nil {
-		return "", err
-	}
-	if !st.Mode().IsRegular() {
-		return "", fsx.ErrNotRegular
-	}
-	f, err := os.Open(path)
+	f, err := fsx.OpenRegular(path)
 	if err != nil {
 		return "", err
 	}

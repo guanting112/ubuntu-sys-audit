@@ -85,7 +85,8 @@ func checkModules(c *Context) []model.Finding {
 	// /proc/modules, but the sysfs entry usually survives. Built-in modules
 	// also live in /sys/module; they have no initstate file.
 	var hidden []string
-	if dirs, err := os.ReadDir("/sys/module"); err == nil {
+	dirs, sysErr := os.ReadDir("/sys/module")
+	if sysErr == nil {
 		for _, d := range dirs {
 			if _, err := os.Stat(filepath.Join("/sys/module", d.Name(), "initstate")); err != nil {
 				continue
@@ -101,6 +102,8 @@ func checkModules(c *Context) []model.Finding {
 		f.Evidence = hidden
 		f.Remediation = "Isolate the host, boot from clean media and perform offline forensics. Output from this host can no longer be trusted."
 		out = append(out, f)
+	} else if sysErr != nil {
+		out = append(out, skipped("integrity.hidden_module", cat, "Hidden kernel modules", "Cannot read /sys/module: "+sysErr.Error()))
 	} else if c.Host.IsRoot {
 		out = append(out, finding("integrity.hidden_module", cat, model.OK, "/proc/modules matches /sys/module"))
 	}
@@ -142,6 +145,33 @@ func checkPAM(c *Context) []model.Finding {
 		seen[real] = true
 		if !c.Owned(real) {
 			rogue = append(rogue, real)
+		}
+	}
+	// A module can also be loaded by absolute path from anywhere, so the directories
+	// above are not the whole picture.
+	allConfigs, _ := filepath.Glob("/etc/pam.d/*")
+	for _, p := range allConfigs {
+		b, err := fsx.Read(p, 1<<18)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "#") {
+				continue
+			}
+			for _, tok := range strings.Fields(line) {
+				if !strings.HasSuffix(tok, ".so") || !filepath.IsAbs(tok) {
+					continue
+				}
+				real, err := filepath.EvalSymlinks(tok)
+				if err != nil {
+					real = tok
+				}
+				if !seen[real] && !c.Owned(real) {
+					seen[real] = true
+					rogue = append(rogue, real+"  (loaded by "+base(p)+")")
+				}
+			}
 		}
 	}
 	if len(rogue) > 0 {
@@ -214,14 +244,28 @@ func checkBinaries(c *Context) []model.Finding {
 	var key, other []string
 	for _, m := range res.Mismatches {
 		line := m.Path + "  (package " + m.Package + ")"
+		if m.LinkTarget != "" {
+			line += "  replaced by " + m.LinkTarget
+		}
 		if keyBinary.MatchString(m.Path) {
 			key = append(key, line)
 		} else {
 			other = append(other, line)
 		}
 	}
+	var keyMissing, otherMissing []string
+	for _, m := range res.Missing {
+		line := m.Path + "  (package " + m.Package + ")"
+		if keyBinary.MatchString(m.Path) {
+			keyMissing = append(keyMissing, line)
+		} else {
+			otherMissing = append(otherMissing, line)
+		}
+	}
 	sort.Strings(key)
 	sort.Strings(other)
+	sort.Strings(keyMissing)
+	sort.Strings(otherMissing)
 	hint := "Restore with apt install --reinstall <package>. Copy the suspect file somewhere safe first."
 	if len(key) > 0 {
 		f := finding("integrity.binaries_key", cat, model.Critical, fmt.Sprintf("Key system files do not match package hashes (%d)", len(key)))
@@ -238,7 +282,23 @@ func checkBinaries(c *Context) []model.Finding {
 		f.Remediation = hint
 		out = append(out, f)
 	}
-	if len(key)+len(other) == 0 {
+	if len(keyMissing) > 0 {
+		f := finding("integrity.binaries_key_missing", cat, model.High, fmt.Sprintf("Key system files are missing (%d)", len(keyMissing)))
+		f.Detail = "An installed package ships these files, but they are gone. Removing a tool on purpose looks the same, so confirm who did it."
+		f.Evidence = keyMissing
+		f.Remediation = hint
+		out = append(out, f)
+	}
+	if len(otherMissing) > 0 {
+		f := finding("integrity.binaries_missing", cat, model.Info, fmt.Sprintf("Package files are missing (%d)", len(otherMissing)))
+		f.Detail = "Minimal images and hardening steps remove files like these."
+		f.Evidence = otherMissing
+		out = append(out, f)
+	}
+	if res.Unreadable > 0 {
+		out = append(out, skipped("integrity.binaries_unreadable", cat, "Some system files could not be read", strconv.Itoa(res.Unreadable)+" files could not be hashed, so they were not verified."))
+	}
+	if len(key)+len(other)+len(keyMissing) == 0 && !res.Incomplete && res.Unreadable == 0 {
 		f := finding("integrity.binaries", cat, model.OK, "Verified "+strconv.Itoa(res.Checked)+" system files against package hashes, all match")
 		f.Detail = "The baseline is the local dpkg database. An attacker who also changes the database will not be caught by this check."
 		out = append(out, f)

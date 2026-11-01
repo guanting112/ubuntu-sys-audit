@@ -79,3 +79,21 @@ func TestParseStatHandlesHostileComm(t *testing.T) {
 		t.Error("kernel thread flag not detected")
 	}
 }
+
+func TestKeepSocket(t *testing.T) {
+	seen := map[uint64]bool{}
+	listener := Socket{Proto: "tcp", State: StateListen, LocalPort: 53}
+	if !keepSocket(listener, seen) || !keepSocket(listener, seen) {
+		t.Error("a listener with inode 0 must not be dropped")
+	}
+	if keepSocket(Socket{Proto: "tcp", State: StateEstablished}, seen) {
+		t.Error("a connection with inode 0 has no owner and should be dropped")
+	}
+	withInode := Socket{Proto: "tcp", State: StateListen, Inode: 7}
+	if !keepSocket(withInode, seen) {
+		t.Error("first sighting must be kept")
+	}
+	if keepSocket(withInode, seen) {
+		t.Error("the same socket from another table must be deduplicated")
+	}
+}

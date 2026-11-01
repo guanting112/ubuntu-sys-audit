@@ -86,6 +86,8 @@ type test struct {
 // Feed is a parsed OVAL document, reduced to what evaluation needs.
 type Feed struct {
 	Timestamp string
+	// Release is the Ubuntu codename the feed's definitions are for.
+	Release   string
 	defs      []definition
 	tests     map[string]test
 	objectVar map[string]string
@@ -93,6 +95,18 @@ type Feed struct {
 	statePat  map[string]string
 	vars      map[string][]string
 	kernelRe  *regexp.Regexp
+}
+
+// KernelRecognized reports whether any USN applies to this kind of kernel. Mainline
+// and custom kernels match nothing, so having no kernel hits says nothing about
+// them and must not be read as a clean result.
+func (f *Feed) KernelRecognized(release string) bool {
+	for _, pattern := range f.statePat {
+		if re, err := regexp.Compile(pattern); err == nil && re.MatchString(release) {
+			return true
+		}
+	}
+	return false
 }
 
 // DefinitionCount returns how many USN definitions were loaded.
@@ -205,6 +219,8 @@ type xmlCriteria struct {
 	} `xml:",any"`
 }
 
+var releaseInID = regexp.MustCompile(`^oval:com\.ubuntu\.([a-z]+):def:`)
+
 var usnTitle = regexp.MustCompile(`^(USN-[0-9]+-[0-9]+)\b`)
 
 func (f *Feed) readDefinition(dec *xml.Decoder, start *xml.StartElement) error {
@@ -214,6 +230,11 @@ func (f *Feed) readDefinition(dec *xml.Decoder, start *xml.StartElement) error {
 	var x xmlDefinition
 	if err := dec.DecodeElement(&x, start); err != nil {
 		return err
+	}
+	if f.Release == "" {
+		if m := releaseInID.FindStringSubmatch(attr(start.Attr, "id")); m != nil {
+			f.Release = m[1]
+		}
 	}
 	// Only patch class USNs. LSN entries describe livepatches and the
 	// inventory definition only asserts the release.

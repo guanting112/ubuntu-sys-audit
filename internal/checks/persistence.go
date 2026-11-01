@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"ubuntu-sys-audit/internal/dpkg"
 	"ubuntu-sys-audit/internal/fsx"
 	"ubuntu-sys-audit/internal/model"
 )
@@ -101,25 +102,21 @@ var userInitFiles = []string{
 // where being unowned says nothing.
 var expectedUnowned = regexp.MustCompile(`^/etc/(crontab|environment|profile|bash\.bashrc|cron\.d/\.placeholder|cron\.\w+/\.placeholder|apt/apt\.conf\.d/(20auto-upgrades|50unattended-upgrades|01autoremove|01-vendor-ubuntu|70debconf|99[-\w]*|docker-\w+)|ld\.so\.conf\.d/(libc\.conf|.*-linux-gnu.*\.conf|fakeroot.*\.conf)|modprobe\.d/\w+\.conf|modules-load\.d/modules\.conf)$`)
 
+const persistLimit = 1 << 20
+
 func checkPersistence(c *Context) []model.Finding {
 	const cat = model.CatPersistence
-	var malicious, tempRefs []string
+	var malicious, tempRefs, linked, tooLarge []string
+	linkedToTemp := false
 	unowned := map[string][]string{}
 	scanned := 0
 	cutoff := time.Now().Add(-7 * 24 * time.Hour)
 
-	scan := func(path, group string, noFollow bool, userFile bool) {
-		var b []byte
-		var err error
-		if noFollow {
-			b, err = fsx.ReadNoFollow(path, 1<<20)
-		} else {
-			b, err = fsx.Read(path, 1<<20)
-		}
-		if err != nil {
-			return
-		}
+	inspect := func(path, group string, b []byte, userFile bool) {
 		scanned++
+		if len(b) >= persistLimit {
+			tooLarge = append(tooLarge, path)
+		}
 		owned := c.Owned(path)
 		for _, raw := range strings.Split(string(b), "\n") {
 			line := strings.TrimSpace(raw)
@@ -144,15 +141,55 @@ func checkPersistence(c *Context) []model.Finding {
 			for _, raw := range strings.Split(string(b), "\n") {
 				line := strings.TrimSpace(raw)
 				if line != "" && !strings.HasPrefix(line, "#") {
-					entry += "\n" + line
+					unowned[group] = append(unowned[group], base(path)+": "+line)
 				}
-			}
-			for _, e := range strings.Split(entry, "\n")[1:] {
-				unowned[group] = append(unowned[group], base(path)+": "+e)
 			}
 			return
 		}
 		unowned[group] = append(unowned[group], entry)
+	}
+
+	scan := func(path, group string, noFollow bool) {
+		var b []byte
+		var err error
+		if noFollow {
+			b, err = fsx.ReadNoFollow(path, persistLimit)
+		} else {
+			b, err = fsx.Read(path, persistLimit)
+		}
+		if err == nil {
+			inspect(path, group, b, false)
+		}
+	}
+
+	// scanHome covers a login script in a home directory. A link to a dotfiles
+	// checkout inside the home is normal and gets scanned. A link leading elsewhere
+	// is reported but never read, because its target could be /etc/shadow.
+	scanHome := func(u User, rel string) {
+		const group = "home login script"
+		full := filepath.Join(u.Home, rel)
+		st, err := os.Lstat(full)
+		if err != nil {
+			return
+		}
+		if st.Mode()&os.ModeSymlink == 0 {
+			if b, err := fsx.ReadUnder(u.Home, rel, persistLimit); err == nil {
+				inspect(full, group, b, true)
+			}
+			return
+		}
+		target, err := filepath.EvalSymlinks(full)
+		if err != nil || target == "/dev/null" {
+			return
+		}
+		if home, err := filepath.EvalSymlinks(u.Home); err == nil && inDirs(target, home) {
+			if b, err := fsx.ReadNoFollow(target, persistLimit); err == nil {
+				inspect(full, group, b, true)
+			}
+			return
+		}
+		linked = append(linked, full+" -> "+target)
+		linkedToTemp = linkedToTemp || inTemp(target)
 	}
 
 	for _, t := range persistTargets {
@@ -164,16 +201,16 @@ func checkPersistence(c *Context) []model.Finding {
 			if base(m) == ".placeholder" {
 				continue
 			}
-			scan(m, t.group, t.noFollow, false)
+			scan(m, t.group, t.noFollow)
 		}
 	}
 	for _, u := range c.Homes() {
 		for _, name := range userInitFiles {
-			scan(filepath.Join(u.Home, name), "home login script", true, true)
+			scanHome(u, name)
 		}
 		auto, _ := filepath.Glob(filepath.Join(u.Home, ".config/autostart/*"))
 		for _, a := range auto {
-			scan(a, "desktop autostart", true, false)
+			scan(a, "desktop autostart", true)
 		}
 	}
 
@@ -189,6 +226,22 @@ func checkPersistence(c *Context) []model.Finding {
 		f := finding("persistence.temp_exec", cat, model.High, "Scheduled jobs or login scripts run programs from temp directories")
 		f.Evidence = tempRefs
 		f.Remediation = "Confirm the purpose. Anyone can write to temp directories, which is a privilege escalation risk in itself."
+		out = append(out, f)
+	}
+	if len(linked) > 0 {
+		sev := model.Medium
+		if linkedToTemp {
+			sev = model.High
+		}
+		f := finding("persistence.home_symlink", cat, sev, fmt.Sprintf("Login scripts that link outside the home directory (%d)", len(linked)))
+		f.Detail = "The shell still runs these at login, but this scan does not read what they point to, because the target could be a secret file. Check them by hand."
+		f.Evidence = linked
+		out = append(out, f)
+	}
+	if len(tooLarge) > 0 {
+		f := finding("persistence.truncated", cat, model.Medium, fmt.Sprintf("Files too large to scan completely (%d)", len(tooLarge)))
+		f.Detail = "Only the first 1 MiB of each was scanned. Padding can hide a malicious line from this check."
+		f.Evidence = tooLarge
 		out = append(out, f)
 	}
 	var groups []string
@@ -217,6 +270,16 @@ func checkPersistence(c *Context) []model.Finding {
 var systemdDirs = []string{
 	"/etc/systemd/system", "/run/systemd/system", "/usr/local/lib/systemd/system",
 	"/usr/lib/systemd/system", "/lib/systemd/system", "/etc/systemd/user", "/usr/lib/systemd/user",
+}
+
+func isSystemdPath(path string) bool {
+	norm := dpkg.NormalizePath(path)
+	for _, dir := range systemdDirs {
+		if inDirs(norm, dpkg.NormalizePath(dir)) {
+			return true
+		}
+	}
+	return false
 }
 
 var execKeyRe = regexp.MustCompile(`^(ExecStart|ExecStartPre|ExecStartPost|ExecStop|ExecStopPost|ExecReload)=(.*)$`)
@@ -276,6 +339,19 @@ func checkSystemd(c *Context) []model.Finding {
 		return strings.HasSuffix(name, ".service") || strings.HasSuffix(name, ".conf") ||
 			strings.HasSuffix(name, ".timer") || strings.HasSuffix(name, ".path") || strings.HasSuffix(name, ".socket")
 	}
+	// scanLinked handles a unit that is a symlink. Enablement links point at units
+	// scanned at their real path anyway. systemctl link can point anywhere, so a
+	// target outside the unit directories gets scanned here, or it would be missed.
+	scanLinked := func(p string, noFollow bool) {
+		real, err := filepath.EvalSymlinks(p)
+		if err != nil || real == "/dev/null" || isSystemdPath(real) {
+			return
+		}
+		if inTemp(real) {
+			tempExec = append(tempExec, p+" is a unit file in a temp directory: "+real)
+		}
+		scanUnit(real, noFollow)
+	}
 	for _, dir := range systemdDirs {
 		_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -284,9 +360,12 @@ func checkSystemd(c *Context) []model.Finding {
 			if c.Ctx.Err() != nil {
 				return filepath.SkipAll
 			}
-			// Enablement symlinks point at units scanned at their real path.
-			if d.Type().IsRegular() && wanted(d.Name()) {
+			switch {
+			case !wanted(d.Name()):
+			case d.Type().IsRegular():
 				scanUnit(p, false)
+			case d.Type()&fs.ModeSymlink != 0:
+				scanLinked(p, false)
 			}
 			return nil
 		})
@@ -297,8 +376,12 @@ func checkSystemd(c *Context) []model.Finding {
 			if err != nil {
 				return nil
 			}
-			if d.Type().IsRegular() && wanted(d.Name()) {
+			switch {
+			case !wanted(d.Name()):
+			case d.Type().IsRegular():
 				scanUnit(p, true)
+			case d.Type()&fs.ModeSymlink != 0:
+				scanLinked(p, true)
 			}
 			return nil
 		})

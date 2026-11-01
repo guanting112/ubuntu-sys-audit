@@ -43,7 +43,23 @@ for release in "$@"; do
 	docker exec "$name" sh -c '/opt/e2e/audit --json >/root/clean.json 2>/dev/null; python3 /opt/e2e/assert.py clean /root/clean.json' || status=1
 
 	docker exec "$name" sh /opt/e2e/plant.sh >/dev/null 2>&1
-	docker exec "$name" sh -c 'rm -f /etc/ld.so.preload.keep; /opt/e2e/audit --json >/root/dirty.json 2>/dev/null; python3 /opt/e2e/assert.py planted /root/dirty.json' 2>/dev/null || status=1
+	# Run from /tmp, the way people often do, to confirm the tool ignores itself.
+	docker exec "$name" sh -c 'cp /opt/e2e/audit /tmp/audit; /tmp/audit --json >/root/dirty.json 2>/dev/null; python3 /opt/e2e/assert.py planted /root/dirty.json' 2>/dev/null || status=1
+
+	# -o must refuse paths that would give a limited sudo user control of a file,
+	# without losing the report or the exit code for the critical findings.
+	docker exec "$name" sh -c '
+		cp /etc/issue /root/issue.bak
+		SUDO_UID=1000 SUDO_GID=1000 /opt/e2e/audit --json --offline --skip-fs -o /etc/issue >/root/o.json 2>/dev/null; code=$?
+		cmp -s /etc/issue /root/issue.bak || { echo "  FAIL -o overwrote an existing file"; exit 1; }
+		[ "$code" = 2 ] || { echo "  FAIL a failed -o changed the exit code to $code"; exit 1; }
+		[ -s /root/o.json ] || { echo "  FAIL a failed -o lost the report on stdout"; exit 1; }
+		SUDO_UID=1000 SUDO_GID=1000 /opt/e2e/audit --json --offline --skip-fs -o /etc/new-report.json >/dev/null 2>&1
+		[ ! -e /etc/new-report.json ] || { echo "  FAIL -o created a file in a directory the sudo user cannot write to"; exit 1; }
+		/opt/e2e/audit --json --offline --skip-fs -o /root/own.json >/dev/null 2>&1
+		[ "$(stat -c %a /root/own.json)" = 600 ] || { echo "  FAIL report is not mode 600"; exit 1; }
+		echo "  -o: refused unsafe paths, kept exit 2, report mode 600"
+	' 2>/dev/null || status=1
 
 	docker exec "$name" sh -c '
 		strace -f -qq -o /root/st.txt \
