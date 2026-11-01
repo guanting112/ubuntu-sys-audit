@@ -94,6 +94,9 @@ type Model struct {
 	width  int
 	height int
 
+	splash bool
+	frame  int
+
 	phase    phase
 	started  time.Time
 	elapsed  time.Duration
@@ -141,7 +144,7 @@ func New(ctx context.Context, opts checks.Options) *Model {
 		events: make(chan checks.Event, 8), done: make(chan *model.Report, 1),
 		st: newStyles(true), started: time.Now(), rows: rows,
 		live: map[model.Severity]int{}, spinner: sp, progress: bar,
-		search: ti, detail: vp, focus: paneList,
+		search: ti, detail: vp, focus: paneList, splash: true,
 		host: checks.NewContext(cctx, opts).Host,
 	}
 }
@@ -158,7 +161,7 @@ func (m *Model) Init() tea.Cmd {
 		m.done <- report
 		close(m.events)
 	}()
-	return tea.Batch(m.waitEvent(), m.spinner.Tick, tea.RequestBackgroundColor, tick())
+	return tea.Batch(m.waitEvent(), m.spinner.Tick, tea.RequestBackgroundColor, tick(), splashTimer(), animTick())
 }
 
 func tick() tea.Cmd {
@@ -188,6 +191,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
 		return m, nil
+	case splashDoneMsg:
+		m.splash = false
+		return m, nil
+	case animTickMsg:
+		if !m.splash && m.phase != phaseScan {
+			return m, nil
+		}
+		m.frame++
+		return m, animTick()
 	case tickMsg:
 		if m.phase == phaseScan {
 			m.elapsed = time.Since(m.started)
@@ -248,6 +260,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.cancel()
 		m.aborted = m.phase == phaseScan
 		return m, tea.Quit
+	}
+	// Any key but quit only dismisses the opening screen, so a key pressed to skip
+	// it cannot also act on the screen underneath.
+	if m.splash && key != "q" {
+		m.splash = false
+		return m, nil
 	}
 	if m.phase == phaseScan {
 		if key == "q" {
@@ -560,6 +578,8 @@ func (m *Model) View() tea.View {
 	case m.width == 0:
 	case m.width < minWidth || m.height < minHeight:
 		content = fmt.Sprintf("Terminal too small (%dx%d), need at least %dx%d.", m.width, m.height, minWidth, minHeight)
+	case m.splash:
+		content = m.viewSplash()
 	case m.phase == phaseScan:
 		content = m.viewScan()
 	default:
@@ -587,42 +607,16 @@ func (m *Model) viewScan() string {
 		b.WriteString(st.warn.Render(ansi.Truncate("Not running as root, so some items will be marked not checked. Use sudo.", m.width, "…")) + "\n")
 	}
 	b.WriteString("\n")
-	total := len(m.rows)
-	pct := float64(m.finished) / float64(max(total, 1))
-	b.WriteString(m.progress.ViewAs(pct))
-	b.WriteString(st.subtle.Render(fmt.Sprintf("  %d/%d  %s", m.finished, total, m.elapsed.Round(time.Second))) + "\n\n")
-
 	reserved := 8
 	if !m.host.IsRoot {
 		reserved++
 	}
 	avail := max(m.height-reserved, 3)
-	twoCol := m.width >= 96 && total/2+total%2 <= avail
-	if twoCol {
-		half := total/2 + total%2
-		colW := (m.width - 2) / 2
-		var left, right []string
-		for i := range half {
-			left = append(left, m.renderRow(i, colW))
-		}
-		for i := half; i < total; i++ {
-			right = append(right, m.renderRow(i, colW))
-		}
-		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
-			lipgloss.NewStyle().Width(colW+2).Render(strings.Join(left, "\n")),
-			strings.Join(right, "\n")) + "\n")
-	} else {
-		start := 0
-		for i, r := range m.rows {
-			if r.status == rowRunning {
-				start = i
-			}
-		}
-		start = max(0, min(start-avail/2, total-avail))
-		for i := start; i < min(start+avail, total); i++ {
-			b.WriteString(m.renderRow(i, m.width-1) + "\n")
-		}
-	}
+	total := len(m.rows)
+	pct := float64(m.finished) / float64(max(total, 1))
+	b.WriteString(m.progress.ViewAs(pct))
+	b.WriteString(m.progressSuffix(total, avail) + "\n\n")
+	b.WriteString(m.scanBody(avail) + "\n")
 	status := m.renderLiveCounts()
 	if n := len(m.alerts); n > 0 {
 		status += "  " + st.sevStyle(model.Critical).Render("Latest: "+m.alerts[n-1])
@@ -674,13 +668,13 @@ func (m *Model) renderRow(i, width int) string {
 	case rowDone:
 		nameStyle = st.subtle
 	}
-	name := nameStyle.Render(ansi.Truncate(row.check.Name, max(width-14, 8), "…"))
 	tail := ""
 	for _, sev := range []model.Severity{model.Critical, model.High, model.Medium} {
 		if n := row.counts[sev]; n > 0 {
 			tail += " " + st.sevStyle(sev).Render(fmt.Sprintf("%d", n))
 		}
 	}
+	name := nameStyle.Render(ansi.Truncate(row.check.Name, max(width-2-lipgloss.Width(tail), 8), "…"))
 	return icon + " " + name + tail
 }
 

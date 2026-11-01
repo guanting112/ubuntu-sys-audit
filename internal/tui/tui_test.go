@@ -47,6 +47,7 @@ func newResultsModel(t *testing.T, w, h int) *Model {
 	m := New(context.Background(), checks.Options{Version: "test"})
 	m.report = sampleReport()
 	m.phase = phaseResults
+	m.splash = false
 	m.buildCategories()
 	m.applyFilter()
 	m.Update(tea.WindowSizeMsg{Width: w, Height: h})
@@ -189,6 +190,144 @@ func TestSelectedCategoryTabStaysVisibleOnNarrowTerminals(t *testing.T) {
 				t.Errorf("width %d: tabs are %d cells wide", width, got)
 			}
 		}
+	}
+}
+
+const artFrames = 8 * 4
+
+func TestSplashFitsEveryTerminalSize(t *testing.T) {
+	for _, s := range sizes {
+		m := New(context.Background(), checks.Options{Version: "v0.1.4"})
+		m.Update(tea.WindowSizeMsg{Width: s[0], Height: s[1]})
+		for range artFrames {
+			assertFits(t, m.viewSplash(), s[0], s[1])
+			m.frame++
+		}
+	}
+}
+
+func TestArtIsPlainAndKeepsItsShape(t *testing.T) {
+	for _, alarmed := range []bool{false, true} {
+		base := detectiveFrame(0, alarmed)
+		for frame := range artFrames {
+			lines := detectiveFrame(frame, alarmed)
+			if len(lines) != len(base) {
+				t.Fatalf("frame %d has %d lines, want %d", frame, len(lines), len(base))
+			}
+			for i, line := range lines {
+				// Anything but plain ASCII can render at the wrong width.
+				for _, r := range line {
+					if r > 126 || r < 32 {
+						t.Fatalf("frame %d has %q in %q", frame, r, line)
+					}
+				}
+				if strings.Contains(line, "{") {
+					t.Fatalf("frame %d has an unreplaced placeholder: %q", frame, line)
+				}
+				if len(line) != len(base[i]) {
+					t.Fatalf("frame %d line %d changes width, which would make the art jump", frame, i)
+				}
+			}
+		}
+	}
+}
+
+func TestSplashShowsFirstThenTheScan(t *testing.T) {
+	m := New(context.Background(), checks.Options{Version: "test"})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if !strings.Contains(m.View().Content, "Press any key") {
+		t.Error("the opening screen should show first")
+	}
+	m.Update(splashDoneMsg{})
+	if strings.Contains(m.View().Content, "Press any key") {
+		t.Error("the opening screen should end when its timer fires")
+	}
+}
+
+func TestAnimationRunsThroughTheScanAndThenStops(t *testing.T) {
+	m := New(context.Background(), checks.Options{Version: "test"})
+	m.Update(splashDoneMsg{})
+	before := m.frame
+	if _, cmd := m.Update(animTickMsg{}); cmd == nil || m.frame == before {
+		t.Error("the detective should keep animating during the scan")
+	}
+	m.phase = phaseResults
+	if _, cmd := m.Update(animTickMsg{}); cmd != nil {
+		t.Error("the animation must stop once the results are up")
+	}
+}
+
+func TestSplashKeyOnlyDismisses(t *testing.T) {
+	m := newResultsModel(t, 120, 30)
+	m.splash = true
+	m.handleKey(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	if m.splash {
+		t.Error("a key should dismiss the opening screen")
+	}
+	if m.filter != filterAll {
+		t.Error("the key that dismissed it must not also act on the screen underneath")
+	}
+	m.handleKey(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	if m.filter == filterAll {
+		t.Error("keys should work normally afterwards")
+	}
+}
+
+func TestSplashCanStillQuit(t *testing.T) {
+	m := New(context.Background(), checks.Options{Version: "test"})
+	if _, cmd := m.handleKey(tea.KeyPressMsg{Code: 'q', Text: "q"}); cmd == nil {
+		t.Error("q must still abort during the opening screen")
+	}
+	if !m.aborted {
+		t.Error("q during the scan should count as an abort")
+	}
+}
+
+func TestScanScreenShowsTheDetective(t *testing.T) {
+	const figure = "[=]"
+	for _, c := range []struct {
+		w, h    int
+		large   bool
+		wantTwo bool
+	}{
+		{160, 50, true, true},
+		{120, 40, true, true},
+		{80, 24, true, false},
+		{60, 18, false, false},
+	} {
+		m := New(context.Background(), checks.Options{Version: "test"})
+		m.host.IsRoot = true
+		m.Update(tea.WindowSizeMsg{Width: c.w, Height: c.h})
+		view := ansi.Strip(m.viewScan())
+		if got := strings.Contains(view, figure); got != c.large {
+			t.Errorf("%dx%d: large art shown = %v, want %v", c.w, c.h, got, c.large)
+		}
+		if !c.large && !strings.Contains(view, "(o_o)") {
+			t.Errorf("%dx%d: a terminal with no room should show the small detective:\n%s", c.w, c.h, view)
+		}
+		// The first check sits in the left column, the last only in the right one.
+		last := m.rows[len(m.rows)-1].check.Name
+		if got := strings.Contains(view, last); c.wantTwo && !got {
+			t.Errorf("%dx%d: two columns should reach the last check %q:\n%s", c.w, c.h, last, view)
+		}
+		assertFits(t, m.viewScan(), c.w, c.h)
+	}
+}
+
+func TestDetectiveReactsToSeriousFindings(t *testing.T) {
+	m := New(context.Background(), checks.Options{Version: "test"})
+	m.host.IsRoot = true
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if strings.Contains(ansi.Strip(m.viewScan()), "O   O") {
+		t.Error("calm before anything is found")
+	}
+	m.applyEvent(checks.Event{Index: 0, Done: true, Findings: []model.Finding{{Severity: model.Medium, Title: "minor"}}})
+	if m.alarmed() {
+		t.Error("a medium finding should not alarm the detective")
+	}
+	m.applyEvent(checks.Event{Index: 1, Done: true, Findings: []model.Finding{{Severity: model.Critical, Title: "bad"}}})
+	if !strings.Contains(ansi.Strip(m.viewScan()), "O   O") {
+		t.Error("eyes should widen once something serious is found")
 	}
 }
 

@@ -76,6 +76,8 @@ Use the exit code to decide what to do next:
 
 `↑↓` or `jk` move · `tab` switch pane · `f` filter by severity · `/` search · `s` save JSON to the current directory · `q` quit
 
+The opening screen disappears on its own after a moment, or on any key. The scan is already running behind it, so it costs no time.
+
 ## What it checks
 
 | Category | Coverage |
