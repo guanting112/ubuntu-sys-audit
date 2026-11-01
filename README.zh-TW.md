@@ -135,10 +135,10 @@ scp "$h:audit.json" "audit-$h.json"
 | --- | --- |
 | CVE | 已安裝套件與執行中 kernel 比對 Ubuntu USN，包含只有 ESM 才有的修補；USN 涵蓋不到的 LXD snap 則比對 Canonical 的 LXD 公告 |
 | Web | nginx、PHP 的版本與來源；非 Ubuntu 套件比對 nginx.org 與 php.net；常見危險設定；webshell 特徵；上傳目錄內的 PHP |
-| 網路 | 53 Port 監聽與擁有者、連到非系統 DNS 的流量、所有監聽 Port、Packet 與 Raw socket、BPFDoor 特徵值、混雜模式、MPTCP 是否啟用（建議關閉）、少用的網路協定（DCCP、SCTP、RDS、TIPC）、ufw 預設策略與 IPv6 缺口、Docker 與繞過 ufw 的容器 Port、LXD API 是否對外與特權容器 |
+| 網路 | 53 Port 監聽與擁有者、連到非系統 DNS 的流量、所有監聽 Port、Packet 與 Raw socket、BPFDoor 特徵值、混雜模式、MPTCP 是否啟用（建議關閉）、少用的網路協定（DCCP、SCTP、RDS、TIPC）、ufw 預設策略與 IPv6 缺口、Docker 與繞過 ufw 的容器 Port、隧道介面與持有它的程式、沒有合理原因的 IP 轉送、預設路由、`/etc/hosts` 覆寫 Ubuntu 網域、LXD API 是否對外與特權容器 |
 | 程序 | 偽裝成 kernel thread 或系統服務、從暫存目錄或記憶體執行、reverse shell、Web 服務底下的 shell、挖礦程式、LD_PRELOAD、隱藏程序、已被更新但仍在使用的函式庫 |
-| 完整性 | 系統執行檔與 dpkg 雜湊比對、`ld.so.preload`、隱藏的 kernel 模組、未簽章模組、PAM 模組與設定、`core_pattern`、`modprobe` 路徑 |
-| 持久化 | cron、at、rc.local、init.d、profile、motd、apt hook、udev、systemd 服務、家目錄登入腳本 |
+| 完整性 | 系統執行檔與 dpkg 雜湊比對、`ld.so.preload`、隱藏的 kernel 模組、未簽章模組、PAM 模組與設定、NSS 模組、`core_pattern`、`modprobe` 路徑 |
+| 持久化 | cron、at、rc.local、init.d、profile、motd、apt hook、udev、systemd 服務、家目錄登入腳本、TCP Wrappers 指令 |
 | 帳號 | 帳號數量與清單、UID 0 帳號、空白密碼、sudo 規則、高權限群組、登入紀錄、SSH 暴力嘗試 |
 | SSH | `sshd_config` 有效設定、授權金鑰清單與指紋、系統帳號的金鑰、host key 權限 |
 | 檔案 | SUID／SGID、Capabilities、暫存目錄的執行檔、`/dev` 內的一般檔案、任何人可寫的系統檔、非套件管理的系統執行檔 |

@@ -49,6 +49,9 @@ func main() {
 			// Does nothing. The caller sets argv[0] to test name based checks.
 			time.Sleep(24 * time.Hour)
 			return
+		case "tunnel":
+			tunnelFixture()
+			return
 		}
 	}
 	// systemd-resolved holds 127.0.0.53:53, which makes a wildcard bind fail,
@@ -100,6 +103,26 @@ func bindDNS() net.PacketConn {
 		return conn
 	}
 	return nil
+}
+
+// tunnelFixture holds a tun interface open without reading from it, the way a
+// tunneling tool would.
+func tunnelFixture() {
+	f, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "open tun:", err)
+		os.Exit(1)
+	}
+	defer f.Close()
+	const iffTun, iffNoPi, tunSetIff = 0x0001, 0x1000, 0x400454ca
+	var ifr [40]byte
+	copy(ifr[:], "e2etun0")
+	*(*uint16)(unsafe.Pointer(&ifr[16])) = iffTun | iffNoPi
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), tunSetIff, uintptr(unsafe.Pointer(&ifr))); e != 0 {
+		fmt.Fprintln(os.Stderr, "TUNSETIFF:", e)
+		os.Exit(1)
+	}
+	time.Sleep(24 * time.Hour)
 }
 
 // reverseShellFixture connects a shell's stdio to a local TCP listener, which

@@ -51,6 +51,8 @@ func All() []Check {
 		{"network.firewall", "Firewall status", model.CatNetwork, quick, checkFirewall},
 		{"network.mptcp", "Multipath TCP (MPTCP)", model.CatNetwork, quick, checkMPTCP},
 		{"network.protocols", "Rarely used network protocols", model.CatNetwork, quick, checkRareProtocols},
+		{"network.routing", "Tunnels and routing", model.CatNetwork, quick, checkTunnelsAndRouting},
+		{"network.names", "Name resolution files", model.CatNetwork, quick, checkNameResolution},
 		{"network.docker", "Docker and containers", model.CatNetwork, quick, checkDocker},
 		{"process.suspicious", "Suspicious processes", model.CatProcess, quick, checkProcesses},
 		{"process.libs", "Deleted libraries still in use", model.CatProcess, quick, checkStaleLibs},

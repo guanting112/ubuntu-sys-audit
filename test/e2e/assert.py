@@ -19,6 +19,12 @@ PLANTED = {
     "network.ufw_policy": "medium",
     "network.ufw_ipv6": "medium",
     "docker.ufw_bypass": "medium",
+    "network.hosts_override": "high",
+    "integrity.nss_unmanaged": "high",
+    "persistence.tcp_wrappers": "high",
+    "network.tunnel_suspicious": "high",
+    "network.exposed.etcd": "high",
+    "network.exposed.snmp": "medium",
     "accounts.sudo_system": "critical",
     "accounts.service_shell": "high",
     "accounts.history_wiped": "high",
@@ -135,6 +141,15 @@ def check_planted(report, raw):
     expect("network.protocols", "rds", "a loadable protocol was not reported")
     expect("network.protocols", "sctp", "a blacklist in a file modprobe ignores was accepted")
     refuse("network.protocols", "tipc", "a blocked protocol was reported")
+    expect("network.hosts_override", "security.ubuntu.com", "an overridden update domain was not named")
+    expect("network.hosts_override", "ports.ubuntu.com", "a domain pointing at a private address was not named")
+    expect("integrity.nss_unmanaged", "libnss_evilnss.so.2", "a rogue NSS library was not named")
+    expect("integrity.nss_other", "missingnss", "a module with no library was not listed")
+    refuse("integrity.nss_unmanaged", "NOTFOUND", "an NSS action was read as a module")
+    expect("persistence.tcp_wrappers", "spawn", "a TCP Wrappers command was not named")
+    expect("network.tunnel_suspicious", "e2etun0", "a tun interface was not tied to the process holding it")
+    expect("network.tunnel_suspicious", "/var/tmp/vpn", "the program holding a tunnel was not named")
+    expect("network.tunnels", "e2etun0 (tun)", "a tunnel was not listed")
     refuse("network.listener_bad_exe", "nginx", "a service awaiting restart was called malware")
     refuse("process.temp_exe", "/tmp/audit", "the tool flagged itself")
     refuse("filesystem.temp_elf", "/tmp/audit", "the tool flagged its own binary")

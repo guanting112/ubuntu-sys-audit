@@ -27,6 +27,7 @@ type Process struct {
 	NetNS       string
 	Sockets     []uint64
 	StdioSocket map[int]uint64 // fd 0, 1, 2 -> socket inode, when they are sockets
+	TunFDs      []int          // descriptors open on /dev/net/tun
 }
 
 // CmdlineString returns the command line joined by spaces.
@@ -139,7 +140,16 @@ func readSockets(p *Process, dir string) {
 	}
 	for _, fd := range fds {
 		link, err := os.Readlink(filepath.Join(dir, "fd", fd.Name()))
-		if err != nil || !strings.HasPrefix(link, "socket:[") {
+		if err != nil {
+			continue
+		}
+		if link == "/dev/net/tun" {
+			if n, err := strconv.Atoi(fd.Name()); err == nil {
+				p.TunFDs = append(p.TunFDs, n)
+			}
+			continue
+		}
+		if !strings.HasPrefix(link, "socket:[") {
 			continue
 		}
 		ino, err := strconv.ParseUint(strings.TrimSuffix(strings.TrimPrefix(link, "socket:["), "]"), 10, 64)

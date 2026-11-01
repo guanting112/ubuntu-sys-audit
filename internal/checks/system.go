@@ -197,6 +197,11 @@ var sysctlRules = []sysctlRule{
 	{"net/ipv4/tcp_syncookies", "net.ipv4.tcp_syncookies", notEqual("1"), model.Info, "SYN flood protection is off.", "1"},
 	{"net/ipv4/conf/all/accept_source_route", "net.ipv4.conf.all.accept_source_route", notEqual("0"), model.Medium, "Source routed packets are accepted.", "0"},
 	{"net/ipv4/conf/all/accept_redirects", "net.ipv4.conf.all.accept_redirects", notEqual("0"), model.Info, "ICMP redirects are accepted and could be used to change routes.", "0"},
+	{"net/ipv4/conf/all/send_redirects", "net.ipv4.conf.all.send_redirects", notEqual("0"), model.Info, "A host that is not a router has no reason to send ICMP redirects.", "0"},
+	{"net/ipv4/conf/all/rp_filter", "net.ipv4.conf.all.rp_filter", func(v string) bool { return v == "0" }, model.Info, "Reverse path filtering is off unless an interface sets it, which makes spoofed source addresses easier.", "1 or 2"},
+	{"net/ipv6/conf/all/accept_redirects", "net.ipv6.conf.all.accept_redirects", notEqual("0"), model.Info, "IPv6 ICMP redirects are accepted and could be used to change routes.", "0"},
+	// Zero still allows the harmless type 2 routing header, and negative values refuse them all.
+	{"net/ipv6/conf/all/accept_source_route", "net.ipv6.conf.all.accept_source_route", func(v string) bool { return v != "0" && !strings.HasPrefix(v, "-") }, model.Info, "Source routed IPv6 packets are accepted.", "0"},
 }
 
 func checkSysctl(c *Context) []model.Finding {

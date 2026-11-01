@@ -208,6 +208,9 @@ var riskyPorts = map[uint16]riskyPort{
 	5432: {model.Medium, "PostgreSQL"}, 5900: {model.Medium, "VNC"}, 6379: {model.High, "Redis"},
 	9200: {model.High, "Elasticsearch"}, 10250: {model.Medium, "kubelet"},
 	11211: {model.High, "Memcached"}, 27017: {model.High, "MongoDB"},
+	161: {model.Medium, "SNMP"}, 631: {model.Medium, "CUPS"}, 873: {model.Medium, "rsync"},
+	2379: {model.High, "etcd"}, 3389: {model.Medium, "RDP"}, 5672: {model.Medium, "RabbitMQ"},
+	6443: {model.Medium, "Kubernetes API"}, 9090: {model.Medium, "Prometheus"}, 15672: {model.Medium, "RabbitMQ"},
 }
 
 // Kernel services hold sockets with no owning process.
