@@ -3,9 +3,11 @@ package checks
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -228,6 +230,57 @@ func wantVerify(path string) bool {
 	return strings.HasPrefix(path, "/usr/lib/") && verifiedLib.MatchString(path)
 }
 
+// packageNames returns the sorted, unique package names, without the :arch
+// that md5sums files carry for multi-arch packages.
+func packageNames(pkgs []string) []string {
+	names := map[string]bool{}
+	for _, p := range pkgs {
+		name, _, _ := strings.Cut(p, ":")
+		names[name] = true
+	}
+	return slices.Sorted(maps.Keys(names))
+}
+
+// caddyReplacement describes a Caddy build found where the caddy package's
+// binary should be. The build information is read, the binary is never run.
+func caddyReplacement(c *Context, m dpkg.Mismatch) string {
+	name, _, _ := strings.Cut(m.Package, ":")
+	if name != "caddy" {
+		return ""
+	}
+	info, err := readBuildInfo(m.Path)
+	if err != nil {
+		return ""
+	}
+	inst, ok := caddyFromBuild(info)
+	if !ok {
+		return ""
+	}
+	var pkgVersion string
+	if vs := c.PackageVersions()["caddy"]; len(vs) > 0 {
+		pkgVersion = vs[0]
+	}
+	return caddyReplacementNote(inst, pkgVersion)
+}
+
+func caddyReplacementNote(inst caddyInstance, pkgVersion string) string {
+	ver := inst.Version
+	if ver == "" {
+		ver = "of unknown version"
+	}
+	note := "now holds Caddy " + ver
+	if inst.Go != "" {
+		note += " built with " + inst.Go
+	}
+	if n := len(inst.Plugins); n > 0 {
+		note += " and " + plural(n, "plugin")
+	}
+	if pkgVersion != "" {
+		note += ", not the caddy " + pkgVersion + " package's build"
+	}
+	return note
+}
+
 func checkBinaries(c *Context) []model.Finding {
 	const cat = model.CatIntegrity
 	owners, err := c.Owners()
@@ -241,23 +294,30 @@ func checkBinaries(c *Context) []model.Finding {
 		return []model.Finding{skipped("integrity.binaries", cat, "System binary hashes", err.Error())}
 	}
 	var out []model.Finding
-	var key, other []string
+	var key, other, keyPkgs, otherPkgs []string
+	caddyBuild := false
 	for _, m := range res.Mismatches {
 		line := m.Path + "  (package " + m.Package + ")"
 		if m.LinkTarget != "" {
 			line += "  replaced by " + m.LinkTarget
+		} else if note := caddyReplacement(c, m); note != "" {
+			line += "  " + note
+			caddyBuild = true
 		}
 		if keyBinary.MatchString(m.Path) {
 			key = append(key, line)
+			keyPkgs = append(keyPkgs, m.Package)
 		} else {
 			other = append(other, line)
+			otherPkgs = append(otherPkgs, m.Package)
 		}
 	}
-	var keyMissing, otherMissing []string
+	var keyMissing, otherMissing, keyMissingPkgs []string
 	for _, m := range res.Missing {
 		line := m.Path + "  (package " + m.Package + ")"
 		if keyBinary.MatchString(m.Path) {
 			keyMissing = append(keyMissing, line)
+			keyMissingPkgs = append(keyMissingPkgs, m.Package)
 		} else {
 			otherMissing = append(otherMissing, line)
 		}
@@ -266,12 +326,14 @@ func checkBinaries(c *Context) []model.Finding {
 	sort.Strings(other)
 	sort.Strings(keyMissing)
 	sort.Strings(otherMissing)
-	hint := "Restore with apt install --reinstall <package>. Copy the suspect file somewhere safe first."
+	hint := func(pkgs []string) string {
+		return "Copy the suspect files somewhere safe first, then restore them with sudo apt install --reinstall " + strings.Join(packageNames(pkgs), " ") + "."
+	}
 	if len(key) > 0 {
 		f := finding("integrity.binaries_key", cat, model.Critical, fmt.Sprintf("Key system files do not match package hashes (%d)", len(key)))
 		f.Detail = "Replacing files like ssh, sudo and ps is a typical sign of a trojan or rootkit."
 		f.Evidence = key
-		f.Remediation = hint
+		f.Remediation = hint(keyPkgs)
 		f.Focus = true
 		out = append(out, f)
 	}
@@ -279,14 +341,19 @@ func checkBinaries(c *Context) []model.Finding {
 		f := finding("integrity.binaries_other", cat, model.High, fmt.Sprintf("System files do not match package hashes (%d)", len(other)))
 		f.Detail = "This may be a manual edit or local patch, or the file may have been tampered with."
 		f.Evidence = other
-		f.Remediation = hint
+		f.Remediation = hint(otherPkgs)
+		if caddyBuild {
+			f.Detail += " A Caddy build in place of the caddy package's binary is what caddy upgrade, caddy add-package or copying an xcaddy build leaves behind, so confirm that was done on purpose. web.caddy.upstream checks that build for known vulnerabilities."
+			f.Remediation += " Reinstalling caddy drops any plugins. To keep a custom Caddy, install it beside the package with dpkg-divert and update-alternatives as Caddy's guide shows; a diverted file is not reported here."
+			f.Refs = append(f.Refs, caddyCustomBuildDoc)
+		}
 		out = append(out, f)
 	}
 	if len(keyMissing) > 0 {
 		f := finding("integrity.binaries_key_missing", cat, model.High, fmt.Sprintf("Key system files are missing (%d)", len(keyMissing)))
 		f.Detail = "An installed package ships these files, but they are gone. Removing a tool on purpose looks the same, so confirm who did it."
 		f.Evidence = keyMissing
-		f.Remediation = hint
+		f.Remediation = "Restore them with sudo apt install --reinstall " + strings.Join(packageNames(keyMissingPkgs), " ") + "."
 		out = append(out, f)
 	}
 	if len(otherMissing) > 0 {

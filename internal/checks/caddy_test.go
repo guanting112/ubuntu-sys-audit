@@ -292,3 +292,21 @@ func TestCaddyReplaced(t *testing.T) {
 		}
 	}
 }
+
+func TestCaddyReplacementNote(t *testing.T) {
+	upgraded := caddyInstance{Version: "2.11.7", Go: "go1.26.4"}
+	if got := caddyReplacementNote(upgraded, "2.10.2"); got != "now holds Caddy 2.11.7 built with go1.26.4, not the caddy 2.10.2 package's build" {
+		t.Errorf("got %q", got)
+	}
+	xcaddy := caddyInstance{Version: "2.11.7", Go: "go1.27.3", Plugins: []string{"github.com/caddy-dns/cloudflare v0.2.4"}}
+	if got := caddyReplacementNote(xcaddy, ""); got != "now holds Caddy 2.11.7 built with go1.27.3 and 1 plugin" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestPackageNames(t *testing.T) {
+	got := packageNames([]string{"openssh-server", "libc6:amd64", "caddy", "libc6:amd64", "coreutils"})
+	if want := []string{"caddy", "coreutils", "libc6", "openssh-server"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
