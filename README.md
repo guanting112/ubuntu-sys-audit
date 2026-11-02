@@ -147,7 +147,7 @@ The opening screen disappears on its own after a moment, or on any key. The scan
 | Category | Coverage |
 | --- | --- |
 | CVE | Installed packages and the running kernel against Ubuntu Security Notices (USN), including fixes available only through ESM. The LXD snap, which USN does not cover, against Canonical's LXD advisories |
-| Web | nginx and PHP versions and origin; non-Ubuntu builds against nginx.org and php.net; common dangerous settings; webshell signatures; PHP files in upload directories |
+| Web | nginx and PHP versions and origin; non-Ubuntu builds against nginx.org and php.net; Caddy's version, Go toolchain and plugins, read from the binary, with non-Ubuntu builds including xcaddy ones against Go's vulnerability database; common dangerous settings, including Caddy's admin API open to the network and directory listing; webshell signatures in nginx, Apache and Caddy site roots; PHP files in upload directories |
 | Network | Port 53 listeners and their owners, traffic to DNS servers the system is not configured to use, all listening ports, packet and raw sockets, BPFDoor magic values, promiscuous mode, MPTCP enabled (recommends disabling it), rarely used protocols (DCCP, SCTP, RDS, TIPC), ufw's default policy and IPv6 gaps, Docker and container ports that bypass ufw, tunnel interfaces and the programs holding them, unexplained IP forwarding, default routes, `/etc/hosts` overrides of Ubuntu domains, LXD API exposure and privileged LXD containers |
 | Processes | Processes posing as kernel threads or system services, execution from temporary directories or memory, reverse shells, shells under web services, crypto miners, LD_PRELOAD, hidden processes, libraries replaced on disk but still in use |
 | Integrity | System binaries against dpkg hashes, `ld.so.preload`, hidden kernel modules, unsigned modules, PAM modules and configuration, NSS modules, `core_pattern`, the `modprobe` path |
@@ -175,7 +175,7 @@ The opening screen disappears on its own after a moment, or on any key. The scan
 
 Known exception: when the tool reads BPF filters, the kernel may automatically load the `af_packet_diag` module, the same effect as running `ss -0`. The report says so when this happens, and `--no-netlink` turns it off.
 
-**Outbound traffic only downloads public data.** The tool connects to `security-metadata.canonical.com`, `nginx.org`, `www.php.net`, `api.github.com` and `api.snapcraft.io` using plain GET requests that send no information about the host. It contacts nginx.org and php.net only when it finds non-Ubuntu builds, and the last two only when it finds LXD.
+**Outbound traffic only downloads public data.** The tool connects to `security-metadata.canonical.com`, `nginx.org`, `www.php.net`, `vuln.go.dev`, `api.github.com` and `api.snapcraft.io` using plain GET requests that send no information about the host. It contacts nginx.org, php.net and vuln.go.dev only when it finds non-Ubuntu builds of nginx, PHP or Caddy, and the last two only when it finds LXD.
 
 **CVE checks do not rely on version numbers alone.** Ubuntu backports fixes to older versions, so `nginx 1.18.0` may already be patched. Apt packages are always compared against Canonical's OVAL data. Only self-compiled, upstream repository and PPA builds are compared against upstream advisories.
 
@@ -219,6 +219,10 @@ Run the binary with sudo, as shown in [Quick start](#quick-start). It compares i
 ### Is this host affected by a specific CVE?
 
 Run it with `--cve CVE-ID`. The answer covers CVEs Ubuntu has not fixed yet, which the normal scan leaves out. See [Check a specific CVE](#check-a-specific-cve).
+
+### Does it check Caddy built with xcaddy?
+
+Yes. Go records the Caddy version, the Go toolchain and every plugin module in the binary, and the tool reads that without running it, including a Caddy running in a container. Builds that are not Ubuntu's own package are compared against Go's vulnerability database, so a vulnerable plugin or an old Go toolchain is reported as well as Caddy itself.
 
 ### How do I check whether nginx or PHP is vulnerable on Ubuntu?
 

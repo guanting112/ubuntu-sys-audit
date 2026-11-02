@@ -705,7 +705,8 @@ func isUploadedPHP(path string, size int64) bool {
 }
 
 func webRoots(c *Context) []string {
-	roots := []string{"/var/www", "/srv/www", "/srv/http", "/usr/share/nginx/html", "/usr/local/nginx/html"}
+	roots := []string{"/var/www", "/srv/www", "/srv/http", "/usr/share/nginx/html", "/usr/local/nginx/html", "/usr/share/caddy"}
+	roots = append(roots, caddyRoots(c)...)
 	for _, path := range nginxConfigPaths(c) {
 		if _, err := os.Stat(path); err == nil {
 			roots = append(roots, loadNginxConfig(path).Roots...)

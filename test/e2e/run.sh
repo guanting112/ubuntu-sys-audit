@@ -18,6 +18,11 @@ trap 'rm -rf "$work"' EXIT
 
 GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=e2e" -o "$work/audit" . || exit 1
 GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -o "$work/fakeimplant" ./test/e2e/fakeimplant || exit 1
+# A real but old Caddy release, for the checks that read Go build information.
+# It is renamed so the clean scan does not find it where Caddy is looked for.
+caddy_version=2.6.4
+curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v$caddy_version/caddy_${caddy_version}_linux_$arch.tar.gz" | tar -xz -C "$work" caddy || exit 1
+mv "$work/caddy" "$work/caddy-e2e"
 cp test/e2e/plant.sh test/e2e/assert.py "$work/"
 chmod -R a+rX "$work"
 

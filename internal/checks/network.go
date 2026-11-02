@@ -211,6 +211,8 @@ var riskyPorts = map[uint16]riskyPort{
 	161: {model.Medium, "SNMP"}, 631: {model.Medium, "CUPS"}, 873: {model.Medium, "rsync"},
 	2379: {model.High, "etcd"}, 3389: {model.Medium, "RDP"}, 5672: {model.Medium, "RabbitMQ"},
 	6443: {model.Medium, "Kubernetes API"}, 9090: {model.Medium, "Prometheus"}, 15672: {model.Medium, "RabbitMQ"},
+	// Caddy's admin API takes a new configuration from anyone, with no password.
+	2019: {model.Critical, "Caddy admin API"},
 }
 
 // Kernel services hold sockets with no owning process.

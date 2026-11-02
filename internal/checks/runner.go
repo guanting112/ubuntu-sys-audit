@@ -70,6 +70,7 @@ func All() []Check {
 		{"web.shell", "Webshell scan", model.CatWeb, 4 * time.Minute, checkWebshells},
 		{"web.nginx", "nginx version and configuration", model.CatWeb, 2 * time.Minute, checkNginx},
 		{"web.php", "PHP version and configuration", model.CatWeb, 2 * time.Minute, checkPHP},
+		{"web.caddy", "Caddy version and configuration", model.CatWeb, 2 * time.Minute, checkCaddy},
 		{"cve.usn", "CVE check (Ubuntu USN)", model.CatCVE, 5 * time.Minute, checkCVE},
 		{"cve.lxd", "LXD version and advisories", model.CatCVE, 2 * time.Minute, checkLXD},
 	}

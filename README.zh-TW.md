@@ -147,7 +147,7 @@ sudo ./ubuntu-sys-audit-linux-amd64 --cve CVE-2026-98432,CVE-2024-6387
 | 類別 | 內容 |
 | --- | --- |
 | CVE | 已安裝套件與執行中 kernel 比對 Ubuntu USN，包含只有 ESM 才有的修補；USN 涵蓋不到的 LXD snap 則比對 Canonical 的 LXD 公告 |
-| Web | nginx、PHP 的版本與來源；非 Ubuntu 套件比對 nginx.org 與 php.net；常見危險設定；webshell 特徵；上傳目錄內的 PHP |
+| Web | nginx、PHP 的版本與來源；非 Ubuntu 套件比對 nginx.org 與 php.net；從執行檔讀取 Caddy 的版本、Go 版本與外掛，非 Ubuntu 套件（含 xcaddy 自編版）比對 Go 漏洞資料庫；常見危險設定，包含 Caddy 管理 API 對外開放與目錄列表；nginx、Apache 與 Caddy 網站目錄的 webshell 特徵；上傳目錄內的 PHP |
 | 網路 | 53 Port 監聽與擁有者、連到非系統 DNS 的流量、所有監聽 Port、Packet 與 Raw socket、BPFDoor 特徵值、混雜模式、MPTCP 是否啟用（建議關閉）、少用的網路協定（DCCP、SCTP、RDS、TIPC）、ufw 預設策略與 IPv6 缺口、Docker 與繞過 ufw 的容器 Port、隧道介面與持有它的程式、沒有合理原因的 IP 轉送、預設路由、`/etc/hosts` 覆寫 Ubuntu 網域、LXD API 是否對外與特權容器 |
 | 程序 | 偽裝成 kernel thread 或系統服務、從暫存目錄或記憶體執行、reverse shell、Web 服務底下的 shell、挖礦程式、LD_PRELOAD、隱藏程序、已被更新但仍在使用的函式庫 |
 | 完整性 | 系統執行檔與 dpkg 雜湊比對、`ld.so.preload`、隱藏的 kernel 模組、未簽章模組、PAM 模組與設定、NSS 模組、`core_pattern`、`modprobe` 路徑 |
@@ -175,7 +175,7 @@ sudo ./ubuntu-sys-audit-linux-amd64 --cve CVE-2026-98432,CVE-2024-6387
 
 已知例外：讀取 BPF 過濾器時，kernel 可能自動載入 `af_packet_diag` 模組，效果和執行 `ss -0` 相同。發生時報告會註明，也可以用 `--no-netlink` 關閉。
 
-**對外連線只下載公開資料。** 連線對象是 `security-metadata.canonical.com`、`nginx.org`、`www.php.net`、`api.github.com` 和 `api.snapcraft.io`，都是單純的 GET，不會傳送主機資訊。其中 nginx.org 和 php.net 只有在發現非 Ubuntu 套件時才會連線，後兩個則只有在發現 LXD 時才會連線。
+**對外連線只下載公開資料。** 連線對象是 `security-metadata.canonical.com`、`nginx.org`、`www.php.net`、`vuln.go.dev`、`api.github.com` 和 `api.snapcraft.io`，都是單純的 GET，不會傳送主機資訊。其中 nginx.org、php.net 和 vuln.go.dev 只有在發現非 Ubuntu 套件的 nginx、PHP 或 Caddy 時才會連線，後兩個則只有在發現 LXD 時才會連線。
 
 **CVE 不只比版本號。** Ubuntu 會把修補 backport 到舊版本，`nginx 1.18.0` 可能早已修補，所以 apt 套件一律比對 Canonical 的 OVAL 資料。自行編譯、官方套件庫或 PPA 的版本才比對上游公告。
 
@@ -219,6 +219,10 @@ sudo ./ubuntu-sys-audit-linux-amd64 --offline --oval-file com.ubuntu.jammy.cve.o
 ### 怎麼知道這台主機是否受某個 CVE 影響？
 
 加上 `--cve CVE-ID` 執行。結果也涵蓋 Ubuntu 還沒修補的 CVE，這部分一般掃描不會列出。見[查詢特定 CVE](#查詢特定-cve)。
+
+### 會檢查用 xcaddy 編譯的 Caddy 嗎？
+
+會。Go 會把 Caddy 版本、編譯用的 Go 版本和所有外掛模組記錄在執行檔裡，工具直接讀取這些資訊，不會執行它；在容器裡執行的 Caddy 也一樣。不是 Ubuntu 套件的版本會比對 Go 漏洞資料庫，所以外掛有漏洞或 Go 版本太舊，也會和 Caddy 本身一起回報。
 
 ### 怎麼確認 Ubuntu 上的 nginx 或 PHP 有沒有漏洞？
 

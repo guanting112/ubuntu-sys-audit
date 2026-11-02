@@ -59,6 +59,10 @@ PLANTED = {
     "web.shell.uploads": "high",
     "web.shell.double_ext": "medium",
     "web.nginx.upstream": "high",
+    "web.caddy.upstream": "high",
+    "web.caddy.admin": "high",
+    "web.caddy.browse": "medium",
+    "network.exposed.caddy": "critical",
     "web.php.upstream": "high",
 }
 
@@ -186,6 +190,15 @@ def check_planted(report, raw):
     expect("persistence.temp_exec", "/etc/cron.yearly/e2e", "a cron.yearly script was not read")
     expect("persistence.temp_exec", "/etc/xdg/autostart/e2e.desktop: Exec=/tmp/.x/desk", "a system wide autostart entry was not read")
     refuse("persistence.temp_exec", "e2e-icon", "an icon path was read as a program")
+    expect("web.caddy", "caddy 2.6.4", "Caddy's version was not read from its build information")
+    expect("web.caddy", "/opt/caddy/caddy", "the running Caddy was not found")
+    expect("web.caddy.upstream", "github.com/caddyserver/caddy/v2 2.6.4", "an old Caddy was not matched against Go's vulnerability database")
+    expect("web.caddy.upstream", "Go standard library", "the Go version Caddy was built with was not checked")
+    expect("web.caddy.admin", "/etc/caddy/Caddyfile: admin 0.0.0.0:2019", "an open admin API in the Caddyfile was not reported")
+    expect("web.caddy.admin", "autosave.json", "Caddy's saved configuration was not read")
+    expect("web.caddy.browse", "/etc/caddy/Caddyfile", "Caddy directory listing was not reported")
+    expect("network.exposed.caddy", ":2019", "a listening Caddy admin API was not reported")
+    expect("web.shell.critical", "/srv/e2e-site/up.php", "a webshell under a Caddy root was not found")
     expect("process.deleted_exe", "nginx", "the stale nginx test did not run")
     expect("network.lxd_privileged", "priv1", "a privileged LXD container was not named")
     expect("network.ufw_ipv6", "2001:db8::1 on eth0", "the public IPv6 address was not named")
