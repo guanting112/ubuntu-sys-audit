@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -67,6 +68,12 @@ type persistTarget struct {
 	glob     string
 	group    string
 	noFollow bool
+	// commands picks out the lines that run something, for files that are mostly
+	// settings. nil means every line is a command.
+	commands func(string) []string
+	// anyOwner judges and lists those commands in a package's file too, for files
+	// where commands leaves out the lines the package ships.
+	anyOwner bool
 }
 
 var persistTargets = []persistTarget{
@@ -76,6 +83,8 @@ var persistTargets = []persistTarget{
 	{glob: "/etc/cron.daily/*", group: "cron"},
 	{glob: "/etc/cron.weekly/*", group: "cron"},
 	{glob: "/etc/cron.monthly/*", group: "cron"},
+	{glob: "/etc/cron.yearly/*", group: "cron"},
+	{glob: "/etc/anacrontab", group: "anacron job", commands: anacronCommands, anyOwner: true},
 	{glob: "/var/spool/cron/crontabs/*", group: "user crontab", noFollow: true},
 	{glob: "/var/spool/cron/atjobs/*", group: "at job", noFollow: true},
 	{glob: "/etc/rc.local", group: "rc.local"},
@@ -90,6 +99,7 @@ var persistTargets = []persistTarget{
 	{glob: "/etc/ld.so.conf.d/*", group: "dynamic linker config"},
 	{glob: "/etc/modules-load.d/*", group: "module loading"},
 	{glob: "/etc/modprobe.d/*", group: "module loading"},
+	{glob: "/etc/xdg/autostart/*", group: "desktop autostart", commands: desktopExec},
 }
 
 var userInitFiles = []string{
@@ -111,26 +121,40 @@ func checkPersistence(c *Context) []model.Finding {
 	scanned := 0
 	cutoff := time.Now().Add(-7 * 24 * time.Hour)
 
-	inspect := func(path, group string, b []byte, userFile bool) {
+	inspect := func(path string, t persistTarget, b []byte, userFile bool) {
 		scanned++
 		if len(b) >= persistLimit {
 			tooLarge = append(tooLarge, path)
 		}
-		owned := c.Owned(path)
-		for _, raw := range strings.Split(string(b), "\n") {
+		judged := t.anyOwner || !c.Owned(path)
+		lines := strings.Split(string(b), "\n")
+		if t.commands != nil {
+			lines = t.commands(string(b))
+		}
+		var commands []string
+		for _, raw := range lines {
 			line := strings.TrimSpace(raw)
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
 			}
+			commands = append(commands, line)
 			if name := matchMalicious(line); name != "" {
 				malicious = append(malicious, fmt.Sprintf("%s (%s): %s", path, name, line))
-			} else if !owned && referencesTempExec(line) {
+			} else if judged && referencesTempExec(line) {
 				tempRefs = append(tempRefs, path+": "+line)
 			}
 		}
-		if owned || userFile || expectedUnowned.MatchString(path) {
+		if !judged || userFile || expectedUnowned.MatchString(path) {
 			return
 		}
+		// These files are mostly settings, so the commands are what to read.
+		if t.commands != nil {
+			for _, line := range commands {
+				unowned[t.group] = append(unowned[t.group], path+": "+line)
+			}
+			return
+		}
+		group := t.group
 		entry := path
 		if st, err := os.Lstat(path); err == nil && st.ModTime().After(cutoff) {
 			entry += " (modified in the last 7 days)"
@@ -148,16 +172,16 @@ func checkPersistence(c *Context) []model.Finding {
 		unowned[group] = append(unowned[group], entry)
 	}
 
-	scan := func(path, group string, noFollow bool) {
+	scan := func(path string, t persistTarget) {
 		var b []byte
 		var err error
-		if noFollow {
+		if t.noFollow {
 			b, err = fsx.ReadNoFollow(path, persistLimit)
 		} else {
 			b, err = fsx.Read(path, persistLimit)
 		}
 		if err == nil {
-			inspect(path, group, b, false)
+			inspect(path, t, b, false)
 		}
 	}
 
@@ -165,7 +189,7 @@ func checkPersistence(c *Context) []model.Finding {
 	// checkout inside the home is normal and gets scanned. A link leading elsewhere
 	// is reported but never read, because its target could be /etc/shadow.
 	scanHome := func(u User, rel string) {
-		const group = "home login script"
+		loginScript := persistTarget{group: "home login script"}
 		full := filepath.Join(u.Home, rel)
 		st, err := os.Lstat(full)
 		if err != nil {
@@ -173,7 +197,7 @@ func checkPersistence(c *Context) []model.Finding {
 		}
 		if st.Mode()&os.ModeSymlink == 0 {
 			if b, err := fsx.ReadUnder(u.Home, rel, persistLimit); err == nil {
-				inspect(full, group, b, true)
+				inspect(full, loginScript, b, true)
 			}
 			return
 		}
@@ -183,7 +207,7 @@ func checkPersistence(c *Context) []model.Finding {
 		}
 		if home, err := filepath.EvalSymlinks(u.Home); err == nil && inDirs(target, home) {
 			if b, err := fsx.ReadNoFollow(target, persistLimit); err == nil {
-				inspect(full, group, b, true)
+				inspect(full, loginScript, b, true)
 			}
 			return
 		}
@@ -191,7 +215,7 @@ func checkPersistence(c *Context) []model.Finding {
 		linkedToTemp = linkedToTemp || inTemp(target)
 	}
 
-	for _, t := range persistTargets {
+	for _, t := range slices.Concat(persistTargets, networkHookTargets) {
 		matches, _ := filepath.Glob(t.glob)
 		for _, m := range matches {
 			if c.Ctx.Err() != nil {
@@ -200,8 +224,15 @@ func checkPersistence(c *Context) []model.Finding {
 			if base(m) == ".placeholder" {
 				continue
 			}
-			scan(m, t.group, t.noFollow)
+			scan(m, t)
 		}
+	}
+	files, tempConfig := logrotateConfigs("")
+	for _, p := range files {
+		scan(p, logrotateTarget)
+	}
+	for _, line := range tempConfig {
+		tempRefs = append(tempRefs, line+" (logrotate configuration in a temp directory)")
 	}
 	for _, u := range c.Homes() {
 		for _, name := range userInitFiles {
@@ -209,7 +240,7 @@ func checkPersistence(c *Context) []model.Finding {
 		}
 		auto, _ := filepath.Glob(filepath.Join(u.Home, ".config/autostart/*"))
 		for _, a := range auto {
-			scan(a, "desktop autostart", true)
+			scan(a, persistTarget{group: "desktop autostart", noFollow: true, commands: desktopExec})
 		}
 	}
 

