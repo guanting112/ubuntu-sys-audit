@@ -224,7 +224,7 @@ sudo ./ubuntu-sys-audit-linux-amd64 --offline --oval-file com.ubuntu.jammy.cve.o
 
 會。Go 會把 Caddy 版本、編譯用的 Go 版本和所有外掛模組記錄在執行檔裡，工具直接讀取這些資訊，不會執行它；在容器裡執行的 Caddy 也一樣。不是 Ubuntu 套件的版本會比對 Go 漏洞資料庫，所以外掛有漏洞或 Go 版本太舊，也會和 Caddy 本身一起回報。
 
-直接把自編版複製蓋掉 caddy 套件的 `/usr/bin/caddy` 時，版本號會和套件一樣，但外掛和 Go 版本都是自編版自己的。工具會拿檔案比對套件記錄的 md5sum，不符就當成自行編譯，並提醒下次 `apt upgrade` 會換回不含外掛的原版。Caddy 官方的做法是用 `dpkg-divert` 和 `update-alternatives` 把自編版裝在套件旁邊。
+把自編版複製蓋掉 caddy 套件的 `/usr/bin/caddy`，或用 `caddy upgrade`、`caddy add-package` 換掉它之後，dpkg 仍會把這個檔案記在套件名下，但它已經不是套件的版本了。工具會拿執行檔的版本和 md5sum 比對套件的紀錄，不符就當成另一個版本來檢查，並提醒下次 `apt upgrade` 會換回不含外掛的原版。Caddy 官方的做法是用 `dpkg-divert` 和 `update-alternatives` 把自編版裝在套件旁邊。
 
 ### 怎麼確認 Ubuntu 上的 nginx 或 PHP 有沒有漏洞？
 

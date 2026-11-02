@@ -216,15 +216,15 @@ func TestCaddyVulnFinding(t *testing.T) {
 		t.Errorf("Go only remediation: %s / %q", goOnly.Remediation, goOnly.Refs)
 	}
 
-	// An xcaddy build copied over /usr/bin/caddy has the package's version, but
-	// apt would overwrite it, so the advice must not be an apt upgrade.
+	// An xcaddy build copied over /usr/bin/caddy can have the package's version,
+	// but apt would overwrite it, so the advice must not be an apt upgrade.
 	over := caddyInstance{Version: "2.11.7", Go: "go1.26.4", Origin: "compiled", Replaced: "/usr/bin/caddy", Plugins: []string{"github.com/caddy-dns/cloudflare v0.2.1"}}
 	o := caddyVulnFinding(over, nil, nil, []govuln.Entry{std}, "x")
-	if o.Title != "caddy 2.11.7 (self-compiled, copied over the packaged binary) has known vulnerabilities: 1 in go1.26.4" {
+	if o.Title != "caddy 2.11.7 (replaces the packaged binary) has known vulnerabilities: 1 in go1.26.4" {
 		t.Errorf("replaced title: %s", o.Title)
 	}
 	if !strings.HasPrefix(o.Remediation, "Rebuild with the latest Caddy and Go: xcaddy build --with github.com/caddy-dns/cloudflare, then") ||
-		!strings.Contains(o.Remediation, "copied over /usr/bin/caddy from the caddy package, so the next apt upgrade of caddy puts the stock build back") ||
+		!strings.Contains(o.Remediation, "replaced /usr/bin/caddy from the caddy package, by a copy or by caddy upgrade or add-package, so the next apt upgrade of caddy puts the stock build back") ||
 		strings.Contains(o.Remediation, "--only-upgrade") || !slices.Contains(o.Refs, caddyCustomBuildDoc) {
 		t.Errorf("replaced remediation: %s / %q", o.Remediation, o.Refs)
 	}
@@ -232,7 +232,7 @@ func TestCaddyVulnFinding(t *testing.T) {
 	if r := caddyVulnFinding(over, nil, nil, []govuln.Entry{std}, "x").Remediation; !strings.HasPrefix(r, "Rebuild with the latest Caddy and Go using xcaddy") || !strings.Contains(r, "sudo apt install --reinstall caddy") {
 		t.Errorf("replaced without plugins: %s", r)
 	}
-	if l := caddyLabel(over); !strings.Contains(l, "[self-compiled, copied over the packaged binary]") {
+	if l := caddyLabel(over); !strings.Contains(l, "[replaces the packaged binary]") {
 		t.Errorf("label: %s", l)
 	}
 
@@ -270,5 +270,25 @@ func TestCaddyConfigFindings(t *testing.T) {
 func TestCaddyAdminPortIsRisky(t *testing.T) {
 	if r, ok := riskyPorts[2019]; !ok || r.sev != model.Critical {
 		t.Errorf("port 2019: %+v", r)
+	}
+}
+
+func TestCaddyReplaced(t *testing.T) {
+	// No md5sums exist here, so only the version can tell.
+	cases := []struct {
+		version, pkg string
+		want         bool
+	}{
+		{"2.11.7", "2.10.2", true}, // caddy upgrade over the 2.10.2 package
+		{"2.11.7", "2.11.7", false},
+		{"2.6.2", "2.6.2-6ubuntu0.24.04.3", false},
+		{"", "2.6.2-14", false}, // Ubuntu's build records no version
+		{"2.11.0-beta.2", "2.11.0~beta.2", false},
+		{"2.11.7", "1:2.10.2-1", true},
+	}
+	for _, c := range cases {
+		if got := caddyReplaced(c.version, c.pkg, "/nonexistent/caddy", "/nonexistent/caddy"); got != c.want {
+			t.Errorf("caddyReplaced(%q, %q) = %v, want %v", c.version, c.pkg, got, c.want)
+		}
 	}
 }

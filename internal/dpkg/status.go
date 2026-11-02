@@ -233,8 +233,7 @@ func Verify(ctx context.Context, owners *Owners, want func(path string) bool) (V
 			if len(line) < 34 {
 				continue
 			}
-			sum, rel := string(line[:32]), strings.TrimSpace(string(line[33:]))
-			recorded := "/" + rel
+			sum, recorded := string(line[:32]), md5sumsPath(line[33:])
 			norm := NormalizePath(recorded)
 			if !want(norm) {
 				continue
@@ -321,7 +320,7 @@ func FileMatches(pkg, path, content string) (match, listed bool, err error) {
 			continue
 		}
 		for _, line := range bytes.Split(b, []byte("\n")) {
-			if len(line) < 34 || NormalizePath("/"+strings.TrimSpace(string(line[33:]))) != want {
+			if len(line) < 34 || NormalizePath(md5sumsPath(line[33:])) != want {
 				continue
 			}
 			got, err := md5File(content)
@@ -332,6 +331,13 @@ func FileMatches(pkg, path, content string) (match, listed bool, err error) {
 		}
 	}
 	return false, false, nil
+}
+
+// md5sumsPath turns an md5sums entry into an absolute path. Packages built with
+// dpkg-deb list usr/bin/x, but some tools write ./usr/bin/x, as the nfpm behind
+// Caddy's own packages did up to 2.10.2. Without this, such files were skipped.
+func md5sumsPath(entry []byte) string {
+	return filepath.Clean("/" + strings.TrimSpace(string(entry)))
 }
 
 func md5File(path string) (string, error) {

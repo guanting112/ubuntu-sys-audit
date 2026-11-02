@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -56,8 +57,8 @@ type caddyInstance struct {
 	Version string // without "v", empty when unknown
 	Go      string // the toolchain it was built with, such as go1.26.8
 	Plugins []string
-	// Replaced is the path of the caddy package's binary when this build was
-	// copied over it. The next apt upgrade of caddy puts the stock build back.
+	// Replaced is the path of the caddy package's binary when this build took
+	// its place. The next apt upgrade of caddy puts the stock build back.
 	Replaced string
 	// Modules maps every module in the build to its version without "v".
 	// Replaced modules whose version cannot be known are left out.
@@ -117,10 +118,18 @@ func caddyFromBuild(info *debug.BuildInfo) (caddyInstance, bool) {
 	return inst, isCaddy
 }
 
+var versionCore = regexp.MustCompile(`^\d+\.\d+\.\d+`)
+
 // caddyReplaced reports whether the binary at a path the caddy package owns
-// differs from the one the package installed. Without md5sums to compare, or
-// when the file cannot be read, it is taken to be the packaged build.
-func caddyReplaced(path, content string) bool {
+// differs from the one the package installed: its version is not the
+// package's, or it does not match the package's md5sum. `caddy upgrade` and
+// `caddy add-package` swap the binary in place like this too. Without md5sums
+// to compare, or when the file cannot be read, a binary of the package's
+// version is taken to be the packaged build.
+func caddyReplaced(version, pkgVersion, path, content string) bool {
+	if v := versionCore.FindString(version); v != "" && v != versionCore.FindString(upstreamOf(pkgVersion)) {
+		return true
+	}
 	match, listed, err := dpkg.FileMatches("caddy", path, content)
 	return listed && err == nil && !match
 }
@@ -150,9 +159,9 @@ func caddyInstances(c *Context) []caddyInstance {
 		switch {
 		case inContainer:
 			inst.Origin = "container"
-		case c.Owned(real) && !isDiverted && pkgVersion != "" && caddyReplaced(real, read):
-			// An xcaddy build copied over the packaged binary. Its version
-			// says 2.11.7 like the package, but the plugins and Go are its own.
+		case c.Owned(real) && !isDiverted && pkgVersion != "" && caddyReplaced(inst.Version, pkgVersion, real, read):
+			// A copied xcaddy build or `caddy upgrade` replaced the packaged
+			// binary, so its version, plugins and Go are not the package's.
 			inst.Origin = "compiled"
 			inst.Replaced = real
 		case c.Owned(real) && !isDiverted && pkgVersion != "":
@@ -493,7 +502,7 @@ func caddyOrigin(i caddyInstance) string {
 	case i.Origin == "upstream-repo":
 		return "Caddy's apt repository"
 	case i.Replaced != "":
-		return "self-compiled, copied over the packaged binary"
+		return "replaces the packaged binary"
 	}
 	return originLabel(i.Origin)
 }
@@ -538,7 +547,7 @@ func checkCaddy(c *Context) []model.Finding {
 			}
 		}
 		summary := finding("web.caddy", cat, model.Info, fmt.Sprintf("Caddy copies found (%d)", len(instances)))
-		summary.Detail = "Ubuntu's caddy package is judged by USN under the CVE category. Other builds, including those made with xcaddy, are compared against Go's vulnerability database. The version, Go toolchain and plugins come from the build information in the binary, which is read and never run. A binary at the caddy package's own path that does not match the package's md5sum counts as self-compiled, and integrity.binaries_other lists it too."
+		summary.Detail = "Ubuntu's caddy package is judged by USN under the CVE category. Other builds, including those made with xcaddy, are compared against Go's vulnerability database. The version, Go toolchain and plugins come from the build information in the binary, which is read and never run. A binary at the caddy package's own path whose version or md5sum differs from the package's was put there by hand or by caddy upgrade, and integrity.binaries_other lists it too."
 		summary.Evidence = inv
 		summary.Focus = true
 		out = append(out, summary)
@@ -728,12 +737,12 @@ func caddyVulnFinding(inst caddyInstance, caddyHits, otherHits, stdHits []govuln
 		}
 		f.Remediation = "Rebuild with the latest Caddy and Go: xcaddy build " + strings.Join(with, " ") + ", then replace the binary and restart Caddy."
 	case inst.Replaced != "":
-		f.Remediation = "Rebuild with the latest Caddy and Go using xcaddy, adding --with for each plugin it needs, or if it needs none, restore the packaged build with sudo apt install --reinstall caddy. Then restart Caddy."
+		f.Remediation = "Rebuild with the latest Caddy and Go using xcaddy, adding --with for each plugin it needs, or if it needs none, restore the packaged build with sudo apt update && sudo apt install --reinstall caddy. Then restart Caddy."
 	default:
 		f.Remediation = "Install the latest Caddy from caddyserver.com or GitHub, then restart Caddy."
 	}
 	if inst.Replaced != "" {
-		f.Remediation += " This build was copied over " + inst.Replaced + " from the caddy package, so the next apt upgrade of caddy puts the stock build back, without any plugins. Caddy's guide keeps a custom build beside the package with dpkg-divert and update-alternatives."
+		f.Remediation += " This build replaced " + inst.Replaced + " from the caddy package, by a copy or by caddy upgrade or add-package, so the next apt upgrade of caddy puts the stock build back, without any plugins. Caddy's guide keeps a custom build beside the package with dpkg-divert and update-alternatives."
 		f.Refs = append(f.Refs, caddyCustomBuildDoc)
 	}
 	f.Focus = true

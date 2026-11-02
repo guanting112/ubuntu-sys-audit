@@ -1,11 +1,13 @@
 package dpkg
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -229,5 +231,37 @@ func TestFileMatches(t *testing.T) {
 	}
 	if match, listed, _ := FileMatches("pkg", "/usr/bin/other", filepath.Join(root, "usr/bin/other")); !match || !listed {
 		t.Errorf("pkg:arch md5sums: match=%v listed=%v", match, listed)
+	}
+}
+
+// Caddy's packages up to 2.10.2 list ./usr/bin/caddy in md5sums. A file
+// replaced in such a package must still be caught.
+func TestVerifyReadsDotSlashEntries(t *testing.T) {
+	root := fakeSystem(t, map[string]string{"usr/bin/caddy": "packaged", "usr/bin/other": "o"})
+	sums := filepath.Join(infoDir, "pkg.md5sums")
+	b, _ := os.ReadFile(sums)
+	dotted := bytes.ReplaceAll(b, []byte("  usr/"), []byte("  ./usr/"))
+	if bytes.Equal(dotted, b) {
+		t.Fatal("fixture did not change")
+	}
+	if err := os.WriteFile(sums, dotted, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(root, "usr/bin/caddy")
+	if match, listed, _ := FileMatches("pkg", "/usr/bin/caddy", bin); !match || !listed {
+		t.Errorf("unchanged: match=%v listed=%v", match, listed)
+	}
+	if err := os.WriteFile(bin, []byte("caddy 2.11.7 from elsewhere"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if match, listed, _ := FileMatches("pkg", "/usr/bin/caddy", bin); match || !listed {
+		t.Errorf("replaced: match=%v listed=%v", match, listed)
+	}
+	res, err := Verify(context.Background(), nil, func(p string) bool { return strings.HasPrefix(p, "/usr/bin/") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Checked != 2 || len(res.Mismatches) != 1 || res.Mismatches[0].Path != "/usr/bin/caddy" {
+		t.Errorf("%+v", res)
 	}
 }
