@@ -403,7 +403,7 @@ func checkRawSockets(c *Context) []model.Finding {
 		f.Requested = c.Opts.NoNetlink
 		out = append(out, f)
 	} else if moduleLoaded {
-		f := finding("network.packet_diag", cat, model.Info, "The kernel auto-loaded packet_diag while BPF filters were read")
+		f := finding("network.packet_diag", cat, model.Info, "The kernel auto-loaded af_packet_diag while BPF filters were read")
 		f.Detail = "Same effect as running ss -0. To avoid it, use --no-netlink."
 		out = append(out, f)
 	}

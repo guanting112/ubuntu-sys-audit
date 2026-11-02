@@ -44,7 +44,7 @@ Options:
   --proxy URL          HTTP proxy for downloading advisory data
   --skip-fs            Skip the full filesystem scan (SUID, capabilities, temp directories)
   --fs-timeout TIME    Time limit for the full filesystem scan (default 5m)
-  --no-netlink         Do not read BPF filters, which keeps the kernel from loading packet_diag
+  --no-netlink         Do not read BPF filters, which keeps the kernel from loading af_packet_diag
   --version            Show the version
 
 Exit codes: 0 nothing to act on, 1 medium findings, 2 critical or high findings,

@@ -120,7 +120,7 @@ Use the exit code to decide what to do next:
 | `--proxy URL` | HTTP proxy for downloading advisory data |
 | `--skip-fs` | Skip the full filesystem scan |
 | `--fs-timeout TIME` | Time limit for the full filesystem scan (default `5m`) |
-| `--no-netlink` | Do not read BPF filters, which keeps the kernel from loading `packet_diag` |
+| `--no-netlink` | Do not read BPF filters, which keeps the kernel from loading `af_packet_diag` |
 | `--version` | Show the version |
 
 ### TUI keys
@@ -160,7 +160,7 @@ The opening screen disappears on its own after a moment, or on any key. The scan
 
 **Read-only.** The tool writes no files unless you pass `-o` or press `s`. Although it runs as root, it never executes a program from the host. Versions are read from the contents of binaries instead of running `nginx -v`. `test/e2e/run.sh` verifies this with strace.
 
-Known exception: when the tool reads BPF filters, the kernel may automatically load the `packet_diag` module, the same effect as running `ss -0`. The report says so when this happens, and `--no-netlink` turns it off.
+Known exception: when the tool reads BPF filters, the kernel may automatically load the `af_packet_diag` module, the same effect as running `ss -0`. The report says so when this happens, and `--no-netlink` turns it off.
 
 **Outbound traffic only downloads public data.** The tool connects to `security-metadata.canonical.com`, `nginx.org`, `www.php.net`, `api.github.com` and `api.snapcraft.io` using plain GET requests that send no information about the host. It contacts nginx.org and php.net only when it finds non-Ubuntu builds, and the last two only when it finds LXD.
 
@@ -209,7 +209,7 @@ It reads the BPF filters on packet sockets, the same data as `ss -0pb`, and repo
 
 ### Is it safe to run on a production server?
 
-The scan is read-only and runs at low CPU and idle I/O priority, using at most 2 CPUs. The one known side effect is that the kernel may load the `packet_diag` module, the same as running `ss -0`, and `--no-netlink` turns that off. On hosts with many files, limit the filesystem scan with `--fs-timeout` or skip it with `--skip-fs`.
+The scan is read-only and runs at low CPU and idle I/O priority, using at most 2 CPUs. The one known side effect is that the kernel may load the `af_packet_diag` module, the same as running `ss -0`, and `--no-netlink` turns that off. On hosts with many files, limit the filesystem scan with `--fs-timeout` or skip it with `--skip-fs`.
 
 ### Does it send information about my host anywhere?
 

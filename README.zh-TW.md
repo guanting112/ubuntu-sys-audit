@@ -120,7 +120,7 @@ scp "$h:audit.json" "audit-$h.json"
 | `--proxy URL` | 下載公告資料時使用的 HTTP proxy |
 | `--skip-fs` | 略過全機檔案掃描 |
 | `--fs-timeout TIME` | 全機檔案掃描的時間上限（預設 `5m`） |
-| `--no-netlink` | 不讀取 BPF 過濾器，避免 kernel 載入 `packet_diag` |
+| `--no-netlink` | 不讀取 BPF 過濾器，避免 kernel 載入 `af_packet_diag` |
 | `--version` | 顯示版本 |
 
 ### TUI 按鍵
@@ -160,7 +160,7 @@ scp "$h:audit.json" "audit-$h.json"
 
 **唯讀。** 工具不會寫入任何檔案，除非你用 `-o` 或按 `s`。以 root 執行時也不會 exec 主機上的任何程式，版本是直接從執行檔內容讀出來的，不會跑 `nginx -v`。`test/e2e/run.sh` 會用 strace 驗證這一點。
 
-已知例外：讀取 BPF 過濾器時，kernel 可能自動載入 `packet_diag` 模組，效果和執行 `ss -0` 相同。發生時報告會註明，也可以用 `--no-netlink` 關閉。
+已知例外：讀取 BPF 過濾器時，kernel 可能自動載入 `af_packet_diag` 模組，效果和執行 `ss -0` 相同。發生時報告會註明，也可以用 `--no-netlink` 關閉。
 
 **對外連線只下載公開資料。** 連線對象是 `security-metadata.canonical.com`、`nginx.org`、`www.php.net`、`api.github.com` 和 `api.snapcraft.io`，都是單純的 GET，不會傳送主機資訊。其中 nginx.org 和 php.net 只有在發現非 Ubuntu 套件時才會連線，後兩個則只有在發現 LXD 時才會連線。
 
@@ -209,7 +209,7 @@ sudo ./ubuntu-sys-audit-linux-amd64 --offline --oval-file com.ubuntu.jammy.usn.o
 
 ### 可以在生產環境執行嗎？
 
-掃描是唯讀的，並以低 CPU 優先權與 idle I/O 執行，最多使用 2 個 CPU。已知唯一的副作用是 kernel 可能載入 `packet_diag` 模組，效果和執行 `ss -0` 相同，可以用 `--no-netlink` 關閉。檔案很多的主機可以用 `--fs-timeout` 限制全機掃描時間，或用 `--skip-fs` 略過。
+掃描是唯讀的，並以低 CPU 優先權與 idle I/O 執行，最多使用 2 個 CPU。已知唯一的副作用是 kernel 可能載入 `af_packet_diag` 模組，效果和執行 `ss -0` 相同，可以用 `--no-netlink` 關閉。檔案很多的主機可以用 `--fs-timeout` 限制全機掃描時間，或用 `--skip-fs` 略過。
 
 ### 會把主機資訊傳到外面嗎？
 

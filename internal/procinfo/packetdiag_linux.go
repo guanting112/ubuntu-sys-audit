@@ -28,11 +28,16 @@ const (
 	packetDiagFilter = 7
 )
 
-// PacketDiagModuleLoaded reports whether the kernel's packet_diag module is
+// packetDiagModule is where the kernel lists the module that answers packet_diag
+// queries. The module is named af_packet_diag, so /sys/module/packet_diag never
+// exists and checking it hid every auto load.
+const packetDiagModule = "/sys/module/af_packet_diag"
+
+// PacketDiagModuleLoaded reports whether the kernel's af_packet_diag module is
 // already present. Querying filters makes the kernel auto load it, the same
 // thing `ss -0` does, so the caller can disclose that.
 func PacketDiagModuleLoaded() bool {
-	_, err := os.Stat("/sys/module/packet_diag")
+	_, err := os.Stat(packetDiagModule)
 	return err == nil
 }
 
