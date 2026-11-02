@@ -1,5 +1,6 @@
-// Package oval parses Canonical's USN OVAL feed and evaluates it against the
-// installed dpkg packages and the running kernel.
+// Package oval parses Canonical's OVAL feeds and evaluates them against the
+// installed dpkg packages and the running kernel: the USN feed for fixes a host
+// is missing, and the CVE feed to look up single CVEs, including unfixed ones.
 //
 // This is the correct way to answer "is this host missing a fix" on Ubuntu:
 // Canonical backports patches, so comparing upstream version numbers against
@@ -95,6 +96,11 @@ type Feed struct {
 	statePat  map[string]string
 	vars      map[string][]string
 	kernelRe  *regexp.Regexp
+
+	// Set when parsing the CVE feed: only the wanted CVEs are kept.
+	filter          *cveFilter
+	cveDefs         []cveDefinition
+	vulnerabilities int
 }
 
 // KernelRecognized reports whether any USN applies to this kind of kernel. Mainline
@@ -114,6 +120,20 @@ func (f *Feed) DefinitionCount() int { return len(f.defs) }
 
 // Parse reads an OVAL document. When bz2 is true the stream is decompressed.
 func Parse(r io.Reader, bz2 bool) (*Feed, error) {
+	return parse(r, bz2, nil)
+}
+
+// sectionsBefore lists what must already have been read when a section starts.
+// A filtered parse keeps only the tests, objects, states and variables the
+// wanted definitions reach, which works only in the order Canonical writes them.
+var sectionsBefore = map[string][]string{
+	"tests":     {"definitions"},
+	"objects":   {"definitions", "tests"},
+	"states":    {"definitions", "tests"},
+	"variables": {"definitions", "tests", "objects"},
+}
+
+func parse(r io.Reader, bz2 bool, filter *cveFilter) (*Feed, error) {
 	if bz2 {
 		r = bzip2.NewReader(r)
 	}
@@ -123,7 +143,9 @@ func Parse(r io.Reader, bz2 bool) (*Feed, error) {
 		stateEVR:  map[string]string{},
 		statePat:  map[string]string{},
 		vars:      map[string][]string{},
+		filter:    filter,
 	}
+	read := map[string]bool{}
 	dec := xml.NewDecoder(r)
 	dec.Strict = false
 	section := ""
@@ -156,7 +178,15 @@ func Parse(r io.Reader, bz2 bool) (*Feed, error) {
 		}
 		switch name {
 		case "definitions", "tests", "objects", "states", "variables":
+			if filter != nil {
+				for _, need := range sectionsBefore[name] {
+					if !read[need] {
+						return nil, fmt.Errorf("oval: %s come before %s, which this reader cannot filter", name, need)
+					}
+				}
+			}
 			section = name
+			read[name] = true
 			continue
 		case "timestamp":
 			if section == "" {
@@ -202,6 +232,7 @@ type xmlDefinition struct {
 			CVEs []struct {
 				Priority string `xml:"priority,attr"`
 				CVSS     string `xml:"cvss_score,attr"`
+				Public   string `xml:"public,attr"`
 				ID       string `xml:",chardata"`
 			} `xml:"cve"`
 		} `xml:"advisory"`
@@ -226,6 +257,9 @@ var usnTitle = regexp.MustCompile(`^(USN-[0-9]+-[0-9]+)\b`)
 func (f *Feed) readDefinition(dec *xml.Decoder, start *xml.StartElement) error {
 	if start.Name.Local != "definition" {
 		return dec.Skip()
+	}
+	if f.filter != nil {
+		return f.readCVEDefinition(dec, start)
 	}
 	var x xmlDefinition
 	if err := dec.DecodeElement(&x, start); err != nil {
@@ -309,6 +343,10 @@ func convertCriteria(x *xmlCriteria) (*criteria, error) {
 }
 
 func (f *Feed) readTest(dec *xml.Decoder, start *xml.StartElement) error {
+	id := attr(start.Attr, "id")
+	if f.filter != nil && !f.filter.tests[id] {
+		return dec.Skip()
+	}
 	var x struct {
 		Object struct {
 			Ref string `xml:"object_ref,attr"`
@@ -320,12 +358,17 @@ func (f *Feed) readTest(dec *xml.Decoder, start *xml.StartElement) error {
 	if err := dec.DecodeElement(&x, start); err != nil {
 		return err
 	}
-	f.tests[attr(start.Attr, "id")] = test{kind: start.Name.Local, object: x.Object.Ref, state: x.State.Ref}
+	f.tests[id] = test{kind: start.Name.Local, object: x.Object.Ref, state: x.State.Ref}
+	if f.filter != nil {
+		f.filter.objects[x.Object.Ref] = true
+		f.filter.states[x.State.Ref] = true
+	}
 	return nil
 }
 
 func (f *Feed) readObject(dec *xml.Decoder, start *xml.StartElement) error {
-	if start.Name.Local != "dpkginfo_object" {
+	id := attr(start.Attr, "id")
+	if start.Name.Local != "dpkginfo_object" || f.filter != nil && !f.filter.objects[id] {
 		return dec.Skip()
 	}
 	var x struct {
@@ -336,12 +379,18 @@ func (f *Feed) readObject(dec *xml.Decoder, start *xml.StartElement) error {
 	if err := dec.DecodeElement(&x, start); err != nil {
 		return err
 	}
-	f.objectVar[attr(start.Attr, "id")] = x.Name.VarRef
+	f.objectVar[id] = x.Name.VarRef
+	if f.filter != nil {
+		f.filter.vars[x.Name.VarRef] = true
+	}
 	return nil
 }
 
 func (f *Feed) readState(dec *xml.Decoder, start *xml.StartElement) error {
 	id := attr(start.Attr, "id")
+	if f.filter != nil && !f.filter.states[id] {
+		return dec.Skip()
+	}
 	switch start.Name.Local {
 	case "dpkginfo_state":
 		var x struct {
@@ -376,6 +425,9 @@ func (f *Feed) readState(dec *xml.Decoder, start *xml.StartElement) error {
 func (f *Feed) readVariable(dec *xml.Decoder, start *xml.StartElement) error {
 	switch start.Name.Local {
 	case "constant_variable":
+		if f.filter != nil && !f.filter.vars[attr(start.Attr, "id")] {
+			return dec.Skip()
+		}
 		var x struct {
 			Values []string `xml:"value"`
 		}

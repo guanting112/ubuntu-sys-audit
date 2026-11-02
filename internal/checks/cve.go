@@ -155,6 +155,24 @@ func describeHit(h oval.Hit) string {
 	return line
 }
 
+// feedAgeFinding reports OVAL data that is old or undated, or returns nil.
+func feedAgeFinding(timestamp string) *model.Finding {
+	ts, err := time.Parse("2006-01-02T15:04:05", timestamp)
+	switch {
+	case err != nil:
+		f := finding("cve.feed_stale", model.CatCVE, model.Medium, "OVAL data has no readable date")
+		f.Detail = "This scan cannot tell how old the data is, so it may miss recent vulnerabilities."
+		f.Remediation = "Download the latest OVAL file."
+		return &f
+	case time.Since(ts) > 14*24*time.Hour:
+		f := finding("cve.feed_stale", model.CatCVE, model.Medium, fmt.Sprintf("OVAL data is %d days old", int(time.Since(ts).Hours()/24)))
+		f.Detail = "The data is dated " + timestamp + ", so vulnerabilities announced later are not covered."
+		f.Remediation = "Download the latest OVAL file."
+		return &f
+	}
+	return nil
+}
+
 func checkCVE(c *Context) []model.Finding {
 	const cat = model.CatCVE
 	title := "CVE check (Ubuntu USN)"
@@ -191,18 +209,8 @@ func checkCVE(c *Context) []model.Finding {
 		return []model.Finding{f}
 	}
 	var out []model.Finding
-	ts, tsErr := time.Parse("2006-01-02T15:04:05", feed.Timestamp)
-	switch {
-	case tsErr != nil:
-		f := finding("cve.feed_stale", cat, model.Medium, "OVAL data has no readable date")
-		f.Detail = "This scan cannot tell how old the data is, so it may miss recent vulnerabilities."
-		f.Remediation = "Download the latest OVAL file."
-		out = append(out, f)
-	case time.Since(ts) > 14*24*time.Hour:
-		f := finding("cve.feed_stale", cat, model.Medium, fmt.Sprintf("OVAL data is %d days old", int(time.Since(ts).Hours()/24)))
-		f.Detail = "The data is dated " + feed.Timestamp + ", so vulnerabilities announced later are not covered."
-		f.Remediation = "Download the latest OVAL file."
-		out = append(out, f)
+	if f := feedAgeFinding(feed.Timestamp); f != nil {
+		out = append(out, *f)
 	}
 	if !feed.KernelRecognized(c.Host.Kernel) {
 		reason := "This kernel matches no flavour in Ubuntu's USN data, as with mainline or custom kernels, so kernel CVEs were not checked."

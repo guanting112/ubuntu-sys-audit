@@ -28,6 +28,8 @@ type Options struct {
 	SkipFS    bool
 	NoNetlink bool
 	FSTimeout time.Duration
+	// CVEs, when set, replaces the scan with a lookup of these CVE IDs.
+	CVEs []string
 }
 
 // User is an /etc/passwd entry.

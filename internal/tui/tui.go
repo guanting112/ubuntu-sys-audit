@@ -128,7 +128,7 @@ type Model struct {
 // New builds the model. The host header is available before the first check.
 func New(ctx context.Context, opts checks.Options) *Model {
 	cctx, cancel := context.WithCancel(ctx)
-	all := checks.All()
+	all := checks.ChecksFor(opts)
 	rows := make([]checkRow, len(all))
 	for i, c := range all {
 		rows[i] = checkRow{check: c, counts: map[model.Severity]int{}}

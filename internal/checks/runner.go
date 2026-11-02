@@ -110,7 +110,7 @@ func Run(ctx context.Context, opts Options, onEvent func(Event)) *model.Report {
 		Host:      c.Host,
 		Findings:  []model.Finding{},
 	}
-	all := All()
+	all := ChecksFor(opts)
 	for i, chk := range all {
 		if ctx.Err() != nil {
 			break

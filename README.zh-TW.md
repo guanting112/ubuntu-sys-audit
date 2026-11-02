@@ -107,6 +107,18 @@ scp "$h:audit.json" "audit-$h.json"
 | 3 | 掃描不完整：有項目未能檢查，不要當成主機沒問題 |
 | 130 | 掃描被中止 |
 
+### 查詢特定 CVE
+
+新的 CVE 公開時，可以直接問每台主機：
+
+```sh
+sudo ./ubuntu-sys-audit-linux-amd64 --cve CVE-2026-98432,CVE-2024-6387
+```
+
+這只會執行查詢。工具會讀取 Canonical 該版本的 CVE 資料，其中也包含還沒有修補的 CVE，然後逐一回答：受影響且已有修補、受影響但尚未釋出修補、已安裝的版本已修補，或不受影響。受影響的主機會以該 CVE 本身的優先等級作為嚴重度，所以在上面的 SSH 迴圈裡，結束代碼 2 代表 high 或 critical 的 CVE 影響到這台主機。
+
+一般掃描不會列出未修補的 CVE，因為光是 kernel，每台主機就有好幾百個。Ubuntu 的資料分不出「修補中」和「還在分類」，所以「尚未釋出修補」最後可能證實不受影響。在容器裡，或使用 Ubuntu 沒有提供的 kernel 時，不會檢查 kernel，結果也會註明。
+
 ### 選項
 
 | 選項 | 說明 |
@@ -114,9 +126,10 @@ scp "$h:audit.json" "audit-$h.json"
 | `--json` | 輸出 JSON 到 stdout，不開 TUI |
 | `--text` | 輸出純文字到 stdout，不開 TUI |
 | `--min-severity LV` | 純文字模式只列出此等級以上：`critical`、`high`、`medium`、`info`、`ok`（預設 `medium`）。未能檢查的項目一律會列出 |
+| `--cve LIST` | 只查詢這些 CVE（以逗號分隔），包含尚未釋出修補的。見[查詢特定 CVE](#查詢特定-cve) |
 | `-o, --output FILE` | 另外把 JSON 報告存成新檔案 FILE（權限 0600），不會覆寫既有檔案 |
 | `--offline` | 不連網。沒有指定 `--oval-file` 時，不比對 CVE |
-| `--oval-file PATH` | 使用本機的 OVAL 檔（`.xml` 或 `.xml.bz2`） |
+| `--oval-file PATH` | 使用本機的 OVAL 檔（`.xml` 或 `.xml.bz2`）。搭配 `--cve` 時要用 CVE 資料檔 |
 | `--proxy URL` | 下載公告資料時使用的 HTTP proxy |
 | `--skip-fs` | 略過全機檔案掃描 |
 | `--fs-timeout TIME` | 全機檔案掃描的時間上限（預設 `5m`） |
@@ -189,6 +202,10 @@ scp "$h:audit.json" "audit-$h.json"
 # bionic=18.04  focal=20.04  jammy=22.04  noble=24.04  resolute=26.04
 curl -fsSLO https://security-metadata.canonical.com/oval/com.ubuntu.jammy.usn.oval.xml.bz2
 sudo ./ubuntu-sys-audit-linux-amd64 --offline --oval-file com.ubuntu.jammy.usn.oval.xml.bz2
+
+# --cve 改用 CVE 資料檔
+curl -fsSLO https://security-metadata.canonical.com/oval/com.ubuntu.jammy.cve.oval.xml.bz2
+sudo ./ubuntu-sys-audit-linux-amd64 --offline --oval-file com.ubuntu.jammy.cve.oval.xml.bz2 --cve CVE-2026-98432
 ```
 
 資料超過 14 天時，報告會提醒你。
@@ -198,6 +215,10 @@ sudo ./ubuntu-sys-audit-linux-amd64 --offline --oval-file com.ubuntu.jammy.usn.o
 ### 怎麼檢查 Ubuntu 主機缺少哪些 CVE 修補？
 
 依照[快速開始](#快速開始)用 sudo 執行即可。工具會把已安裝套件與執行中 kernel 比對 Canonical 的 USN 資料，包含只有 ESM 才有的修補，並列出對應的公告。
+
+### 怎麼知道這台主機是否受某個 CVE 影響？
+
+加上 `--cve CVE-ID` 執行。結果也涵蓋 Ubuntu 還沒修補的 CVE，這部分一般掃描不會列出。見[查詢特定 CVE](#查詢特定-cve)。
 
 ### 怎麼確認 Ubuntu 上的 nginx 或 PHP 有沒有漏洞？
 

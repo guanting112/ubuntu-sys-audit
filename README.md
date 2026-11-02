@@ -107,6 +107,18 @@ Use the exit code to decide what to do next:
 | 3 | Scan incomplete: some items could not be checked, so do not treat the host as clean |
 | 130 | Scan was aborted |
 
+### Check a specific CVE
+
+When a CVE is announced, ask each host about it directly:
+
+```sh
+sudo ./ubuntu-sys-audit-linux-amd64 --cve CVE-2026-98432,CVE-2024-6387
+```
+
+This runs only the lookup. It reads Canonical's CVE data for the release, which also lists CVEs with no fix released yet, and answers each CVE: affected with a fix available, affected with no fix released, fixed in the installed version, or not affected. An affected host gets the CVE's own priority as the severity, so in the SSH loop above, exit code 2 marks the hosts a high or critical CVE reaches.
+
+The normal scan does not list unfixed CVEs, because every host has hundreds of them in the kernel alone. Ubuntu's data does not tell a fix in progress from a CVE still being triaged, so "no fix released" may turn out not to apply. Inside a container, or with a kernel Ubuntu does not ship, the kernel is not checked and the answer says so.
+
 ### Options
 
 | Option | Description |
@@ -114,9 +126,10 @@ Use the exit code to decide what to do next:
 | `--json` | Write JSON to stdout without opening the TUI |
 | `--text` | Write plain text to stdout without opening the TUI |
 | `--min-severity LV` | In text mode, list only this level and above: `critical`, `high`, `medium`, `info`, `ok` (default `medium`). Items that could not be checked are always listed |
+| `--cve LIST` | Only look up these CVEs, separated by commas, including ones with no fix released yet. See [Check a specific CVE](#check-a-specific-cve) |
 | `-o, --output FILE` | Also save the JSON report to a new FILE (mode 0600). An existing file is never overwritten |
 | `--offline` | Do not use the network. CVEs are not checked unless `--oval-file` is given |
-| `--oval-file PATH` | Use a local OVAL file (`.xml` or `.xml.bz2`) |
+| `--oval-file PATH` | Use a local OVAL file (`.xml` or `.xml.bz2`). With `--cve`, this is the CVE feed |
 | `--proxy URL` | HTTP proxy for downloading advisory data |
 | `--skip-fs` | Skip the full filesystem scan |
 | `--fs-timeout TIME` | Time limit for the full filesystem scan (default `5m`) |
@@ -189,6 +202,10 @@ On a machine with internet access, download the OVAL file for the host's release
 # bionic=18.04  focal=20.04  jammy=22.04  noble=24.04  resolute=26.04
 curl -fsSLO https://security-metadata.canonical.com/oval/com.ubuntu.jammy.usn.oval.xml.bz2
 sudo ./ubuntu-sys-audit-linux-amd64 --offline --oval-file com.ubuntu.jammy.usn.oval.xml.bz2
+
+# --cve reads the CVE feed instead
+curl -fsSLO https://security-metadata.canonical.com/oval/com.ubuntu.jammy.cve.oval.xml.bz2
+sudo ./ubuntu-sys-audit-linux-amd64 --offline --oval-file com.ubuntu.jammy.cve.oval.xml.bz2 --cve CVE-2026-98432
 ```
 
 The report warns you when the data is more than 14 days old.
@@ -198,6 +215,10 @@ The report warns you when the data is more than 14 days old.
 ### How do I check an Ubuntu server for missing CVE patches?
 
 Run the binary with sudo, as shown in [Quick start](#quick-start). It compares installed packages and the running kernel against Canonical's USN data, including fixes available only through ESM, and lists the matching notices.
+
+### Is this host affected by a specific CVE?
+
+Run it with `--cve CVE-ID`. The answer covers CVEs Ubuntu has not fixed yet, which the normal scan leaves out. See [Check a specific CVE](#check-a-specific-cve).
 
 ### How do I check whether nginx or PHP is vulnerable on Ubuntu?
 

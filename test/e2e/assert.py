@@ -215,6 +215,28 @@ def check_planted(report, raw):
     return failures
 
 
+def check_lookup(report):
+    """--cve must run only the lookup and answer every CVE asked about."""
+    failures = []
+    ran = [c["id"] for c in report["checks"]]
+    if ran != ["cve.lookup"]:
+        failures.append(f"--cve ran {ran} instead of only the lookup")
+    found = {f["id"]: f for f in report["findings"]}
+    for cve in ("CVE-2024-6387", "CVE-2026-98432"):
+        if "cve.lookup." + cve not in found:
+            failures.append(f"no answer for {cve}")
+    kernel = found.get("cve.lookup.CVE-2026-98432")
+    if kernel and kernel["severity"] != "skipped":
+        failures.append(f"a kernel CVE was answered for a kernel Ubuntu does not ship: [{kernel['severity']}] {kernel['title']}")
+    ssh = found.get("cve.lookup.CVE-2024-6387")
+    if ssh and ssh["severity"] == "skipped":
+        failures.append(f"an openssh CVE was not answered: {ssh['title']}")
+    for f in report["findings"]:
+        if f["id"].startswith("cve.lookup."):
+            print(f"    [{f['severity']}] {f['title']}")
+    return failures
+
+
 def check_text(raw):
     """Report text must be English, with no broken format verbs from Sprintf."""
     failures = []
@@ -231,7 +253,12 @@ def main():
     mode, path = sys.argv[1], sys.argv[2]
     raw = load(path)
     report = json.loads(raw)
-    failures = check_clean(report) if mode == "clean" else check_planted(report, raw)
+    if mode == "clean":
+        failures = check_clean(report)
+    elif mode == "lookup":
+        failures = check_lookup(report)
+    else:
+        failures = check_planted(report, raw)
     failures += check_text(raw)
     failures += [f"check {c['id']} errored: {c['error']}" for c in report["checks"] if c.get("error")]
     summary = report["summary"]

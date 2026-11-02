@@ -46,6 +46,16 @@ for release in "$@"; do
 	# Run from /tmp, the way people often do, to confirm the tool ignores itself.
 	docker exec "$name" sh -c 'cp /opt/e2e/audit /tmp/audit; /tmp/audit --json >/root/dirty.json 2>/dev/null; python3 /opt/e2e/assert.py planted /root/dirty.json' 2>/dev/null || status=1
 
+	# --cve answers single CVEs, including ones with no fix yet. The kernel here
+	# is OrbStack's, not Ubuntu's, so a kernel-only CVE must say so instead of
+	# reading as not affected.
+	docker exec "$name" sh -c '
+		/opt/e2e/audit --cve CVE-2024-6387,CVE-2026-98432 --json >/root/lookup.json 2>/dev/null
+		python3 /opt/e2e/assert.py lookup /root/lookup.json || exit 1
+		/opt/e2e/audit --cve not-a-cve >/dev/null 2>&1; code=$?
+		[ "$code" = 64 ] || { echo "  FAIL an invalid --cve value exited $code"; exit 1; }
+	' 2>/dev/null || status=1
+
 	# -o must refuse paths that would give a limited sudo user control of a file,
 	# without losing the report or the exit code for the critical findings.
 	docker exec "$name" sh -c '

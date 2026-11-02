@@ -39,8 +39,11 @@ Options:
   --min-severity LV    In text mode, list only this level and above: critical, high, medium, info, ok (default medium).
                        Items that could not be checked are always listed
   -o, --output FILE    Also save the JSON report to a new FILE (mode 0600). An existing file is never overwritten
+  --cve LIST           Only look up these CVEs, separated by commas, including ones with no fix
+                       released yet. Downloads Canonical's CVE data for this release (5 to 15 MB)
   --offline            Do not use the network. CVEs are not checked unless --oval-file is given
-  --oval-file PATH     Use a local OVAL file (.xml or .xml.bz2), for hosts without internet access
+  --oval-file PATH     Use a local OVAL file (.xml or .xml.bz2), for hosts without internet access.
+                       With --cve, this is the CVE feed (com.ubuntu.<codename>.cve.oval.xml.bz2)
   --proxy URL          HTTP proxy for downloading advisory data
   --skip-fs            Skip the full filesystem scan (SUID, capabilities, temp directories)
   --fs-timeout TIME    Time limit for the full filesystem scan (default 5m)
@@ -58,7 +61,7 @@ func main() {
 func run() int {
 	var (
 		asJSON, asText, offline, skipFS, noNetlink, showVersion bool
-		outPath, ovalFile, proxy, minSev                        string
+		outPath, ovalFile, proxy, minSev, cveList               string
 		fsTimeout                                               time.Duration
 	)
 	fs := flag.NewFlagSet("ubuntu-sys-audit", flag.ContinueOnError)
@@ -68,6 +71,7 @@ func run() int {
 	fs.StringVar(&minSev, "min-severity", "medium", "")
 	fs.StringVar(&outPath, "output", "", "")
 	fs.StringVar(&outPath, "o", "", "")
+	fs.StringVar(&cveList, "cve", "", "")
 	fs.BoolVar(&offline, "offline", false, "")
 	fs.StringVar(&ovalFile, "oval-file", "", "")
 	fs.StringVar(&proxy, "proxy", "", "")
@@ -90,6 +94,14 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "invalid --min-severity value: %s\n", minSev)
 		return 64
 	}
+	var cves []string
+	if cveList != "" {
+		var err error
+		if cves, err = checks.ParseCVEList(cveList); err != nil {
+			fmt.Fprintf(os.Stderr, "invalid --cve value: %v\n", err)
+			return 64
+		}
+	}
 
 	// Two threads of work is enough, and keeps the scan from competing with
 	// production traffic on the host being audited.
@@ -99,7 +111,7 @@ func run() int {
 
 	opts := checks.Options{
 		Version: version, Offline: offline, OVALFile: ovalFile, Proxy: proxy,
-		SkipFS: skipFS, NoNetlink: noNetlink, FSTimeout: fsTimeout,
+		SkipFS: skipFS, NoNetlink: noNetlink, FSTimeout: fsTimeout, CVEs: cves,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
