@@ -64,6 +64,7 @@ PLANTED = {
     "web.caddy.browse": "medium",
     "network.exposed.caddy": "critical",
     "web.php.upstream": "high",
+    "web.tls.default_cert": "high",
 }
 
 # Secrets planted on the host. None may appear anywhere in a report.
@@ -197,6 +198,11 @@ def check_planted(report, raw):
     expect("web.caddy.admin", "/etc/caddy/Caddyfile: admin 0.0.0.0:2019", "an open admin API in the Caddyfile was not reported")
     expect("web.caddy.admin", "autosave.json", "Caddy's saved configuration was not read")
     expect("web.caddy.browse", "/etc/caddy/Caddyfile", "Caddy directory listing was not reported")
+    expect("web.tls.default_cert", "0.0.0.0:443 via 127.0.0.1", "nginx's default certificate on 443 was not checked at loopback")
+    expect("web.tls.default_cert", "shop.e2e-audit.com, www.e2e-audit.com (self-signed)", "the domains in the default certificate were not named")
+    refuse("web.tls.default_cert", ":8443", "a port whose default server has a localhost certificate was reported")
+    if any(f["id"] == "web.tls.default_cert_timeout" for f in report["findings"]):
+        failures.append("a TLS handshake timed out: " + evidence(report, "web.tls.default_cert_timeout"))
     expect("network.exposed.caddy", ":2019", "a listening Caddy admin API was not reported")
     expect("web.shell.critical", "/srv/e2e-site/up.php", "a webshell under a Caddy root was not found")
     expect("process.deleted_exe", "nginx", "the stale nginx test did not run")

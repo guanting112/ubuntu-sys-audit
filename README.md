@@ -147,7 +147,7 @@ The opening screen disappears on its own after a moment, or on any key. The scan
 | Category | Coverage |
 | --- | --- |
 | CVE | Installed packages and the running kernel against Ubuntu Security Notices (USN), including fixes available only through ESM. The LXD snap, which USN does not cover, against Canonical's LXD advisories |
-| Web | nginx and PHP versions and origin; non-Ubuntu builds against nginx.org and php.net; Caddy's version, Go toolchain and plugins, read from the binary, with non-Ubuntu builds including xcaddy ones against Go's vulnerability database; common dangerous settings, including Caddy's admin API open to the network and directory listing; webshell signatures in nginx, Apache and Caddy site roots; PHP files in upload directories |
+| Web | nginx and PHP versions and origin; non-Ubuntu builds against nginx.org and php.net; Caddy's version, Go toolchain and plugins, read from the binary, with non-Ubuntu builds including xcaddy ones against Go's vulnerability database; common dangerous settings, including Caddy's admin API open to the network and directory listing; the certificate an HTTPS connection without a server name gets, which ties the host's address to its domains; webshell signatures in nginx, Apache and Caddy site roots; PHP files in upload directories |
 | Network | Port 53 listeners and their owners, traffic to DNS servers the system is not configured to use, all listening ports, packet and raw sockets, BPFDoor magic values, promiscuous mode, MPTCP enabled (recommends disabling it), rarely used protocols (DCCP, SCTP, RDS, TIPC), ufw's default policy and IPv6 gaps, Docker and container ports that bypass ufw, tunnel interfaces and the programs holding them, unexplained IP forwarding, default routes, `/etc/hosts` overrides of Ubuntu domains, LXD API exposure and privileged LXD containers |
 | Processes | Processes posing as kernel threads or system services, execution from temporary directories or memory, reverse shells, shells under web services, crypto miners, LD_PRELOAD, hidden processes, libraries replaced on disk but still in use |
 | Integrity | System binaries against dpkg hashes, `ld.so.preload`, hidden kernel modules, unsigned modules, PAM modules and configuration, NSS modules, `core_pattern`, the `modprobe` path |
@@ -174,6 +174,8 @@ The opening screen disappears on its own after a moment, or on any key. The scan
 **Read-only.** The tool writes no files unless you pass `-o` or press `s`. Although it runs as root, it never executes a program from the host. Versions are read from the contents of binaries instead of running `nginx -v`. `test/e2e/run.sh` verifies this with strace.
 
 Known exception: when the tool reads BPF filters, the kernel may automatically load the `af_packet_diag` module, the same effect as running `ss -0`. The report says so when this happens, and `--no-netlink` turns it off.
+
+To see the certificate a scanner such as Censys gets, the tool makes a TLS handshake to the host's own HTTPS ports without a server name. It sends no request, so a TLS port logs nothing for it. Ports that usually carry plain HTTP, such as 80 and 8080, are left out; a plain HTTP site on another port of a web server may log one bad request.
 
 **Outbound traffic only downloads public data.** The tool connects to `security-metadata.canonical.com`, `nginx.org`, `www.php.net`, `vuln.go.dev`, `api.github.com` and `api.snapcraft.io` using plain GET requests that send no information about the host. It contacts nginx.org, php.net and vuln.go.dev only when it finds non-Ubuntu builds of nginx, PHP or Caddy, and the last two only when it finds LXD.
 
@@ -226,6 +228,10 @@ Yes. Go records the Caddy version, the Go toolchain and every plugin module in t
 
 A build copied over `/usr/bin/caddy` from the caddy package, or put there by `caddy upgrade` or `caddy add-package`, is not the package's build even though dpkg still lists the file. The tool compares the binary's version and md5sum with the package's, judges a mismatch as its own build, and warns that the next `apt upgrade` puts the stock build back without the plugins. Caddy's guide installs custom builds beside the package with `dpkg-divert` and `update-alternatives` instead.
 
+### Can scanners tie my server's IP to its domains even behind Cloudflare?
+
+Yes, if HTTPS on the IP gives out a real certificate. Censys and Shodan connect to every IPv4 address without a server name and index the certificate they get, which comes from the default server. The tool makes the same handshake at each HTTPS port and address and reports a certificate that names a domain as High. The fix is a default server that refuses such handshakes (nginx `ssl_reject_handshake on`, 1.19.4 and later) or presents a self-signed certificate for localhost.
+
 ### How do I check whether nginx or PHP is vulnerable on Ubuntu?
 
 Comparing version numbers is not enough, because Ubuntu backports fixes: `nginx 1.18.0` may already be patched. Apt packages are compared against Canonical's OVAL data. Self-compiled, upstream repository and PPA builds are compared against data from nginx.org and php.net. The tool also reports common dangerous settings, webshell signatures and PHP files in upload directories.
@@ -236,7 +242,7 @@ It reads the BPF filters on packet sockets, the same data as `ss -0pb`, and repo
 
 ### Is it safe to run on a production server?
 
-The scan is read-only and runs at low CPU and idle I/O priority, using at most 2 CPUs. The one known side effect is that the kernel may load the `af_packet_diag` module, the same as running `ss -0`, and `--no-netlink` turns that off. On hosts with many files, limit the filesystem scan with `--fs-timeout` or skip it with `--skip-fs`.
+The scan is read-only and runs at low CPU and idle I/O priority, using at most 2 CPUs. The kernel may load the `af_packet_diag` module, the same as running `ss -0`, and `--no-netlink` turns that off. The tool also makes TLS handshakes, without a request, to the host's own HTTPS ports. On hosts with many files, limit the filesystem scan with `--fs-timeout` or skip it with `--skip-fs`.
 
 ### Does it send information about my host anywhere?
 

