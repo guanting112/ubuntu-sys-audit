@@ -200,3 +200,34 @@ func TestVerifyDedupesMergedPaths(t *testing.T) {
 		t.Errorf("one file listed under two paths must be checked once: %+v", res)
 	}
 }
+
+func TestFileMatches(t *testing.T) {
+	root := fakeSystem(t, map[string]string{"usr/bin/caddy": "packaged", "usr/bin/other": "o"})
+	bin := filepath.Join(root, "usr/bin/caddy")
+	if match, listed, err := FileMatches("pkg", "/usr/bin/caddy", bin); !match || !listed || err != nil {
+		t.Errorf("unchanged file: match=%v listed=%v err=%v", match, listed, err)
+	}
+	// /bin/caddy is the same file on a merged /usr.
+	if match, listed, _ := FileMatches("pkg", "/bin/caddy", bin); !match || !listed {
+		t.Errorf("merged path: match=%v listed=%v", match, listed)
+	}
+	if _, listed, _ := FileMatches("pkg", "/usr/bin/caddy.custom", bin); listed {
+		t.Error("a path the package does not ship is not listed")
+	}
+	if _, listed, _ := FileMatches("nope", "/usr/bin/caddy", bin); listed {
+		t.Error("a package without md5sums lists nothing")
+	}
+	if err := os.WriteFile(bin, []byte("xcaddy build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if match, listed, err := FileMatches("pkg", "/usr/bin/caddy", bin); match || !listed || err != nil {
+		t.Errorf("replaced file: match=%v listed=%v err=%v", match, listed, err)
+	}
+	// Multi-arch packages keep their md5sums under pkg:arch.
+	if err := os.Rename(filepath.Join(infoDir, "pkg.md5sums"), filepath.Join(infoDir, "pkg:amd64.md5sums")); err != nil {
+		t.Fatal(err)
+	}
+	if match, listed, _ := FileMatches("pkg", "/usr/bin/other", filepath.Join(root, "usr/bin/other")); !match || !listed {
+		t.Errorf("pkg:arch md5sums: match=%v listed=%v", match, listed)
+	}
+}

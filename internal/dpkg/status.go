@@ -307,6 +307,33 @@ func realPath(path string, cache map[string]string) string {
 	return filepath.Join(real, name)
 }
 
+// FileMatches hashes content and compares it with the md5sum package pkg
+// recorded for path. content is usually path itself, but a running binary is
+// read through /proc/pid/exe. listed is false when pkg's md5sums does not name
+// path, so there is nothing to compare against.
+func FileMatches(pkg, path, content string) (match, listed bool, err error) {
+	sumFiles, _ := filepath.Glob(infoDir + "/" + pkg + ":*.md5sums")
+	sumFiles = append([]string{infoDir + "/" + pkg + ".md5sums"}, sumFiles...)
+	want := NormalizePath(path)
+	for _, sumFile := range sumFiles {
+		b, err := os.ReadFile(sumFile)
+		if err != nil {
+			continue
+		}
+		for _, line := range bytes.Split(b, []byte("\n")) {
+			if len(line) < 34 || NormalizePath("/"+strings.TrimSpace(string(line[33:]))) != want {
+				continue
+			}
+			got, err := md5File(content)
+			if err != nil {
+				return false, true, err
+			}
+			return got == string(line[:32]), true, nil
+		}
+	}
+	return false, false, nil
+}
+
 func md5File(path string) (string, error) {
 	f, err := fsx.OpenRegular(path)
 	if err != nil {

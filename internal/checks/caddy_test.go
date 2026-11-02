@@ -4,6 +4,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"testing"
 
@@ -211,11 +212,35 @@ func TestCaddyVulnFinding(t *testing.T) {
 	if goOnly.Severity != model.Medium || !strings.Contains(goOnly.Title, "(Caddy's apt repository)") || !strings.HasPrefix(goOnly.Remediation, "sudo apt update") {
 		t.Errorf("Go only: [%v] %s / %s", goOnly.Severity, goOnly.Title, goOnly.Remediation)
 	}
+	if !strings.Contains(goOnly.Remediation, "the rest clear with the next Caddy release") || slices.Contains(goOnly.Refs, caddyCustomBuildDoc) {
+		t.Errorf("Go only remediation: %s / %q", goOnly.Remediation, goOnly.Refs)
+	}
+
+	// An xcaddy build copied over /usr/bin/caddy has the package's version, but
+	// apt would overwrite it, so the advice must not be an apt upgrade.
+	over := caddyInstance{Version: "2.11.7", Go: "go1.26.4", Origin: "compiled", Replaced: "/usr/bin/caddy", Plugins: []string{"github.com/caddy-dns/cloudflare v0.2.1"}}
+	o := caddyVulnFinding(over, nil, nil, []govuln.Entry{std}, "x")
+	if o.Title != "caddy 2.11.7 (self-compiled, copied over the packaged binary) has known vulnerabilities: 1 in go1.26.4" {
+		t.Errorf("replaced title: %s", o.Title)
+	}
+	if !strings.HasPrefix(o.Remediation, "Rebuild with the latest Caddy and Go: xcaddy build --with github.com/caddy-dns/cloudflare, then") ||
+		!strings.Contains(o.Remediation, "copied over /usr/bin/caddy from the caddy package, so the next apt upgrade of caddy puts the stock build back") ||
+		strings.Contains(o.Remediation, "--only-upgrade") || !slices.Contains(o.Refs, caddyCustomBuildDoc) {
+		t.Errorf("replaced remediation: %s / %q", o.Remediation, o.Refs)
+	}
+	over.Plugins = nil
+	if r := caddyVulnFinding(over, nil, nil, []govuln.Entry{std}, "x").Remediation; !strings.HasPrefix(r, "Rebuild with the latest Caddy and Go using xcaddy") || !strings.Contains(r, "sudo apt install --reinstall caddy") {
+		t.Errorf("replaced without plugins: %s", r)
+	}
+	if l := caddyLabel(over); !strings.Contains(l, "[self-compiled, copied over the packaged binary]") {
+		t.Errorf("label: %s", l)
+	}
+
 	clean := caddyVulnFinding(caddyInstance{Version: "2.11.7", Go: "go1.26.10", Origin: "container"}, nil, nil, nil, "x")
 	if clean.Severity != model.OK || !strings.Contains(clean.Title, "no known vulnerabilities") {
 		t.Errorf("clean: [%v] %s", clean.Severity, clean.Title)
 	}
-	for _, g := range []model.Finding{f, goOnly, clean} {
+	for _, g := range []model.Finding{f, goOnly, o, clean} {
 		if containsHan(g.Title + g.Detail + g.Remediation) {
 			t.Errorf("text must be English: %s", g.Title)
 		}

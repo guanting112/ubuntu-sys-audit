@@ -22,6 +22,10 @@ import (
 
 const caddyModule = "github.com/caddyserver/caddy/v2"
 
+// caddyCustomBuildDoc shows how to install an xcaddy build beside the caddy
+// package so apt upgrades leave it alone.
+const caddyCustomBuildDoc = "https://caddyserver.com/docs/build#package-support-files-for-custom-builds-for-debianubunturaspbian"
+
 // caddyStandardModules ship in every Caddy build, so they are not plugins.
 var caddyStandardModules = map[string]bool{
 	caddyModule: true, "github.com/caddyserver/certmagic": true, "github.com/caddyserver/zerossl": true,
@@ -52,6 +56,9 @@ type caddyInstance struct {
 	Version string // without "v", empty when unknown
 	Go      string // the toolchain it was built with, such as go1.26.8
 	Plugins []string
+	// Replaced is the path of the caddy package's binary when this build was
+	// copied over it. The next apt upgrade of caddy puts the stock build back.
+	Replaced string
 	// Modules maps every module in the build to its version without "v".
 	// Replaced modules whose version cannot be known are left out.
 	Modules map[string]string
@@ -110,6 +117,14 @@ func caddyFromBuild(info *debug.BuildInfo) (caddyInstance, bool) {
 	return inst, isCaddy
 }
 
+// caddyReplaced reports whether the binary at a path the caddy package owns
+// differs from the one the package installed. Without md5sums to compare, or
+// when the file cannot be read, it is taken to be the packaged build.
+func caddyReplaced(path, content string) bool {
+	match, listed, err := dpkg.FileMatches("caddy", path, content)
+	return listed && err == nil && !match
+}
+
 func caddyInstances(c *Context) []caddyInstance {
 	var out []caddyInstance
 	seen := map[string]bool{}
@@ -135,6 +150,11 @@ func caddyInstances(c *Context) []caddyInstance {
 		switch {
 		case inContainer:
 			inst.Origin = "container"
+		case c.Owned(real) && !isDiverted && pkgVersion != "" && caddyReplaced(real, read):
+			// An xcaddy build copied over the packaged binary. Its version
+			// says 2.11.7 like the package, but the plugins and Go are its own.
+			inst.Origin = "compiled"
+			inst.Replaced = real
 		case c.Owned(real) && !isDiverted && pkgVersion != "":
 			inst.Origin = caddyPackageOrigin(pkgVersion)
 			if inst.Version == "" {
@@ -467,15 +487,23 @@ func caddyRoots(c *Context) []string {
 	return roots
 }
 
+// caddyOrigin names where a build came from.
+func caddyOrigin(i caddyInstance) string {
+	switch {
+	case i.Origin == "upstream-repo":
+		return "Caddy's apt repository"
+	case i.Replaced != "":
+		return "self-compiled, copied over the packaged binary"
+	}
+	return originLabel(i.Origin)
+}
+
 func caddyLabel(i caddyInstance) string {
 	ver := i.Version
 	if ver == "" {
 		ver = "version unknown"
 	}
-	origin := originLabel(i.Origin)
-	if i.Origin == "upstream-repo" {
-		origin = "Caddy's apt repository"
-	}
+	origin := caddyOrigin(i)
 	if n := len(i.Plugins); n > 0 {
 		origin += ", " + plural(n, "plugin")
 	}
@@ -510,7 +538,7 @@ func checkCaddy(c *Context) []model.Finding {
 			}
 		}
 		summary := finding("web.caddy", cat, model.Info, fmt.Sprintf("Caddy copies found (%d)", len(instances)))
-		summary.Detail = "Ubuntu's caddy package is judged by USN under the CVE category. Other builds, including those made with xcaddy, are compared against Go's vulnerability database. The version, Go toolchain and plugins come from the build information in the binary, which is read and never run."
+		summary.Detail = "Ubuntu's caddy package is judged by USN under the CVE category. Other builds, including those made with xcaddy, are compared against Go's vulnerability database. The version, Go toolchain and plugins come from the build information in the binary, which is read and never run. A binary at the caddy package's own path that does not match the package's md5sum counts as self-compiled, and integrity.binaries_other lists it too."
 		summary.Evidence = inv
 		summary.Focus = true
 		out = append(out, summary)
@@ -630,10 +658,7 @@ func caddyVulnFinding(inst caddyInstance, caddyHits, otherHits, stdHits []govuln
 	if ver == "" {
 		ver = "version unknown"
 	}
-	label := fmt.Sprintf("caddy %s (%s)", ver, originLabel(inst.Origin))
-	if inst.Origin == "upstream-repo" {
-		label = fmt.Sprintf("caddy %s (Caddy's apt repository)", ver)
-	}
+	label := fmt.Sprintf("caddy %s (%s)", ver, caddyOrigin(inst))
 	total := len(caddyHits) + len(otherHits) + len(stdHits)
 	if total == 0 {
 		f := finding("web.caddy.upstream", cat, model.OK, label+" has no known vulnerabilities in Go's vulnerability database")
@@ -686,23 +711,30 @@ func caddyVulnFinding(inst caddyInstance, caddyHits, otherHits, stdHits []govuln
 			}
 		}
 	}
-	switch inst.Origin {
-	case "upstream-repo":
+	switch {
+	case inst.Origin == "upstream-repo":
 		f.Remediation = "sudo apt update && sudo apt install --only-upgrade caddy, then restart Caddy."
-	case "container":
-		f.Remediation = "Pull a newer Caddy image and recreate the container."
-	default:
-		if len(inst.Plugins) > 0 {
-			var with []string
-			for _, p := range inst.Plugins {
-				if name := strings.Fields(p)[0]; !strings.Contains(p, " replaced by ") {
-					with = append(with, "--with "+name)
-				}
-			}
-			f.Remediation = "Rebuild with the latest Caddy and Go: xcaddy build " + strings.Join(with, " ") + ", then replace the binary and restart Caddy."
-		} else {
-			f.Remediation = "Install the latest Caddy from caddyserver.com or GitHub, then restart Caddy."
+		if len(caddyHits) == 0 {
+			f.Remediation += " Caddy itself has no entries here, so if apt has nothing newer, the rest clear with the next Caddy release."
 		}
+	case inst.Origin == "container":
+		f.Remediation = "Pull a newer Caddy image and recreate the container."
+	case len(inst.Plugins) > 0:
+		var with []string
+		for _, p := range inst.Plugins {
+			if name := strings.Fields(p)[0]; !strings.Contains(p, " replaced by ") {
+				with = append(with, "--with "+name)
+			}
+		}
+		f.Remediation = "Rebuild with the latest Caddy and Go: xcaddy build " + strings.Join(with, " ") + ", then replace the binary and restart Caddy."
+	case inst.Replaced != "":
+		f.Remediation = "Rebuild with the latest Caddy and Go using xcaddy, adding --with for each plugin it needs, or if it needs none, restore the packaged build with sudo apt install --reinstall caddy. Then restart Caddy."
+	default:
+		f.Remediation = "Install the latest Caddy from caddyserver.com or GitHub, then restart Caddy."
+	}
+	if inst.Replaced != "" {
+		f.Remediation += " This build was copied over " + inst.Replaced + " from the caddy package, so the next apt upgrade of caddy puts the stock build back, without any plugins. Caddy's guide keeps a custom build beside the package with dpkg-divert and update-alternatives."
+		f.Refs = append(f.Refs, caddyCustomBuildDoc)
 	}
 	f.Focus = true
 	return f

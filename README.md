@@ -224,6 +224,8 @@ Run it with `--cve CVE-ID`. The answer covers CVEs Ubuntu has not fixed yet, whi
 
 Yes. Go records the Caddy version, the Go toolchain and every plugin module in the binary, and the tool reads that without running it, including a Caddy running in a container. Builds that are not Ubuntu's own package are compared against Go's vulnerability database, so a vulnerable plugin or an old Go toolchain is reported as well as Caddy itself.
 
+A build copied over `/usr/bin/caddy` from the caddy package reports the package's version number, but its plugins and Go toolchain are its own. The tool compares the file with the package's md5sum, treats a mismatch as self-compiled, and warns that the next `apt upgrade` puts the stock build back without the plugins. Caddy's guide installs custom builds beside the package with `dpkg-divert` and `update-alternatives` instead.
+
 ### How do I check whether nginx or PHP is vulnerable on Ubuntu?
 
 Comparing version numbers is not enough, because Ubuntu backports fixes: `nginx 1.18.0` may already be patched. Apt packages are compared against Canonical's OVAL data. Self-compiled, upstream repository and PPA builds are compared against data from nginx.org and php.net. The tool also reports common dangerous settings, webshell signatures and PHP files in upload directories.
