@@ -33,6 +33,16 @@ PLANTED = {
     "ssh.key_perms": "medium",
     "persistence.malicious": "critical",
     "persistence.systemd_temp": "critical",
+    "persistence.systemd_malicious": "critical",
+    "persistence.systemd_generator_malicious": "critical",
+    "persistence.systemd_generator_unowned": "high",
+    "persistence.systemd_dropin_malicious": "critical",
+    "persistence.systemd_dropin_unowned": "high",
+    "persistence.systemd_dropin_package": "medium",
+    "persistence.systemd_env_inject": "high",
+    "persistence.systemd_env_temp": "high",
+    "persistence.systemd_linger_units": "medium",
+    "persistence.systemd_links": "medium",
     "integrity.preload": "critical",
     "integrity.binaries_key": "critical",
     "filesystem.suid_critical": "critical",
@@ -53,7 +63,7 @@ PLANTED = {
 }
 
 # Secrets planted on the host. None may appear anywhere in a report.
-SECRETS = ["AAAABBBBCCCCDDDD", "hunter2", "$6$saltsalt", "S3CRET1", "S3CRET2", "S3CRET3", "S3CRET4", "S3CRET5"]
+SECRETS = ["AAAABBBBCCCCDDDD", "hunter2", "$6$saltsalt"] + [f"S3CRET{n}" for n in range(1, 11)]
 
 # Categories where a critical or high finding on a stock host is a false alarm.
 # CVEs and support status are real on old releases.
@@ -130,6 +140,36 @@ def check_planted(report, raw):
     expect("integrity.binaries_missing", "/usr/bin/chage", "a deleted binary was not reported")
     expect("web.shell.critical", "/data/www2/hidden.php", "a webshell behind a symlinked release was not found")
     expect("persistence.systemd_temp", "linked.service", "a unit linked from a temp directory was not found")
+    expect("persistence.systemd_generator_unowned", "/etc/systemd/system-generators/e2e-unowned", "a generator from no package was not named")
+    expect("persistence.systemd_generator_malicious", "e2e-malicious", "a signature split across generator lines was not found")
+    expect("persistence.systemd_generator_malicious", "e2e-linked -> /var/tmp/p/gen", "a generator linked to a temp directory was not found")
+    expect("persistence.systemd_generator_malicious", "e2e-dangling -> /tmp/e2e-not-there-yet", "a dangling generator link into a temp directory was not found")
+    expect("persistence.systemd_temp", "e2e-generated.service", "generator output was not scanned")
+    refuse("persistence.systemd_unowned", "generator.late", "generator output was compared with packages")
+    expect("persistence.systemd_transient", "e2e-transient.service", "a real systemd-run unit was not listed")
+    expect("persistence.systemd_transient", "/bin/true", "a transient unit's command was not shown")
+    expect("persistence.systemd_temp", "e2e-transient-temp.service", "a transient unit running from a temp directory was not found")
+    refuse("persistence.systemd_unowned", "/run/systemd/transient", "a transient unit was compared with packages")
+    expect("persistence.systemd_malicious", "e2e-split.service", "a signature behind a line continuation was not found")
+    expect("persistence.systemd_temp", "e2e-condition.service", "ExecCondition was not read")
+    expect("persistence.systemd_temp", "e2e-spaced.service", "spaces around the equals sign hid a command")
+    expect("persistence.systemd_temp", "e2e-chained.service", "an escaped second command was not found")
+    expect("persistence.systemd_env_inject", "e2e-preload.service: LD_PRELOAD=/opt/e2e-evil/hook.so", "LD_PRELOAD in a unit was not reported")
+    expect("persistence.systemd_env_inject", "e2e-envfile.service: EnvironmentFile=/etc/e2e-app.env: LD_AUDIT=/opt/e2e-evil/audit.so", "a loader variable in an environment file was not reported")
+    refuse("persistence.systemd_env_inject", "APP_CRED", "an unrelated variable reached the report")
+    expect("persistence.systemd_env_temp", "e2e-envtemp.service", "an environment file in a temp directory was not reported")
+    expect("persistence.systemd_env_links", "/etc/e2e-linked.env -> /root/e2e-secret.env", "an environment file link was not reported")
+    expect("persistence.systemd_dropin_package", "cron.service.d/e2e.conf", "a drop-in using a package's program was not reported")
+    expect("persistence.systemd_dropin_package", "Original ExecStart: /usr/sbin/cron", "a drop-in's original command was not shown")
+    expect("persistence.systemd_dropin_package", "New ExecStart: /usr/sbin/cron -f -L 15", "a drop-in's new command was not shown")
+    expect("persistence.systemd_dropin_unowned", "nginx.service.d/e2e.conf", "a drop-in using an unpackaged program was not reported")
+    expect("persistence.systemd_dropin_unowned", "New ExecStart: /opt/e2e-evil/nginx", "a drop-in's new command was not shown")
+    expect("persistence.systemd_dropin_malicious", "ssh.service.d/e2e.conf", "a drop-in running from a temp directory was not reported")
+    refuse("persistence.systemd_temp", "ssh.service.d", "a drop-in was reported twice")
+    expect("persistence.systemd_linger", "bob (uid", "a lingering user was not listed")
+    expect("persistence.systemd_linger_units", "bob: /home/bob/.config/systemd/user/e2e-job.service", "a lingering user's unit was not listed")
+    expect("persistence.systemd_links", "e2e-leak.service -> /root/e2e-secret.service", "a unit linking out of a home was not reported")
+    expect("persistence.systemd_links", "/home/bob/.local/share/systemd/user -> /root/e2e-hidden/share/systemd/user", "a linked parent of a unit directory was not reported")
     expect("process.deleted_exe", "nginx", "the stale nginx test did not run")
     expect("network.lxd_privileged", "priv1", "a privileged LXD container was not named")
     expect("network.ufw_ipv6", "2001:db8::1 on eth0", "the public IPv6 address was not named")

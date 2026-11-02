@@ -2,7 +2,6 @@ package checks
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -269,145 +268,37 @@ func checkPersistence(c *Context) []model.Finding {
 
 var systemdDirs = []string{
 	"/etc/systemd/system", "/run/systemd/system", "/usr/local/lib/systemd/system",
-	"/usr/lib/systemd/system", "/lib/systemd/system", "/etc/systemd/user", "/usr/lib/systemd/user",
+	"/usr/lib/systemd/system", "/lib/systemd/system",
+	"/etc/systemd/user", "/etc/xdg/systemd/user", "/run/systemd/user",
+	"/usr/local/lib/systemd/user", "/usr/lib/systemd/user",
 }
+
+// generatedUnitDirs hold what generators write at boot, which no package can own.
+var generatedUnitDirs = []string{"/run/systemd/generator", "/run/systemd/generator.early", "/run/systemd/generator.late"}
+
+// transientUnitDir holds units created through the API, as systemd-run does.
+const transientUnitDir = "/run/systemd/transient"
 
 func isSystemdPath(path string) bool {
 	norm := dpkg.NormalizePath(path)
-	for _, dir := range systemdDirs {
-		if inDirs(norm, dpkg.NormalizePath(dir)) {
-			return true
+	for _, dirs := range [][]string{systemdDirs, generatedUnitDirs, {transientUnitDir}} {
+		for _, dir := range dirs {
+			if inDirs(norm, dpkg.NormalizePath(dir)) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-var execKeyRe = regexp.MustCompile(`^(ExecStart|ExecStartPre|ExecStartPost|ExecStop|ExecStopPost|ExecReload)=(.*)$`)
+// execKeyRe matches a whole unit line. systemd allows spaces around the "=".
+// ExecStopPre exists only in socket units.
+var execKeyRe = regexp.MustCompile(`^(ExecStart|ExecStartPre|ExecStartPost|ExecCondition|ExecStop|ExecStopPre|ExecStopPost|ExecReload)\s*=\s*(.*)$`)
 
 func checkSystemd(c *Context) []model.Finding {
-	const cat = model.CatPersistence
-	var malicious, tempExec, unowned []string
-	cutoff := time.Now().Add(-7 * 24 * time.Hour)
-	seen := map[string]bool{}
-	scanned := 0
-
-	scanUnit := func(path string, noFollow bool) {
-		real := path
-		if seen[real] {
-			return
-		}
-		seen[real] = true
-		var b []byte
-		var err error
-		if noFollow {
-			b, err = fsx.ReadNoFollow(path, 1<<20)
-		} else {
-			b, err = fsx.Read(path, 1<<20)
-		}
-		if err != nil {
-			return
-		}
-		scanned++
-		var execs []string
-		for _, raw := range strings.Split(string(b), "\n") {
-			line := strings.TrimSpace(raw)
-			m := execKeyRe.FindStringSubmatch(line)
-			if m == nil {
-				continue
-			}
-			cmd := strings.TrimLeft(m[2], "-@:+!")
-			execs = append(execs, cmd)
-			if name := matchMalicious(cmd); name != "" {
-				malicious = append(malicious, fmt.Sprintf("%s (%s): %s", path, name, cmd))
-				continue
-			}
-			first := strings.Fields(cmd + " x")[0]
-			if inTemp(first) {
-				tempExec = append(tempExec, path+": "+cmd)
-			}
-		}
-		if !c.Owned(path) && len(execs) > 0 {
-			entry := path + " -> " + execs[0]
-			if st, err := os.Lstat(path); err == nil && st.ModTime().After(cutoff) {
-				entry = "(modified in the last 7 days) " + entry
-			}
-			unowned = append(unowned, entry)
-		}
-	}
-
-	wanted := func(name string) bool {
-		return strings.HasSuffix(name, ".service") || strings.HasSuffix(name, ".conf") ||
-			strings.HasSuffix(name, ".timer") || strings.HasSuffix(name, ".path") || strings.HasSuffix(name, ".socket")
-	}
-	// scanLinked handles a unit that is a symlink. Enablement links point at units
-	// scanned at their real path anyway. systemctl link can point anywhere, so a
-	// target outside the unit directories gets scanned here, or it would be missed.
-	scanLinked := func(p string, noFollow bool) {
-		real, err := filepath.EvalSymlinks(p)
-		if err != nil || real == "/dev/null" || isSystemdPath(real) {
-			return
-		}
-		if inTemp(real) {
-			tempExec = append(tempExec, p+" is a unit file in a temp directory: "+real)
-		}
-		scanUnit(real, noFollow)
-	}
-	for _, dir := range systemdDirs {
-		_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			if c.Ctx.Err() != nil {
-				return filepath.SkipAll
-			}
-			switch {
-			case !wanted(d.Name()):
-			case d.Type().IsRegular():
-				scanUnit(p, false)
-			case d.Type()&fs.ModeSymlink != 0:
-				scanLinked(p, false)
-			}
-			return nil
-		})
-	}
-	for _, u := range c.Homes() {
-		dir := filepath.Join(u.Home, ".config/systemd/user")
-		_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			switch {
-			case !wanted(d.Name()):
-			case d.Type().IsRegular():
-				scanUnit(p, true)
-			case d.Type()&fs.ModeSymlink != 0:
-				scanLinked(p, true)
-			}
-			return nil
-		})
-	}
-	var out []model.Finding
-	if len(malicious) > 0 {
-		f := finding("persistence.systemd_malicious", cat, model.Critical, "systemd services with malicious signs")
-		f.Evidence = malicious
-		f.Remediation = "Back up the unit file as evidence, stop it with systemctl disable --now and investigate how the attacker got in."
-		out = append(out, f)
-	}
-	if len(tempExec) > 0 {
-		f := finding("persistence.systemd_temp", cat, model.Critical, "systemd services run programs from temp directories")
-		f.Detail = "Nothing in a temp directory should run as a systemd service."
-		f.Evidence = tempExec
-		out = append(out, f)
-	}
-	if len(unowned) > 0 {
-		sort.Strings(unowned)
-		f := finding("persistence.systemd_unowned", cat, model.Info, fmt.Sprintf("systemd services that belong to no package (%d)", len(unowned)))
-		f.Detail = "Services you deployed yourself appear here. Confirm you recognize them all."
-		f.Evidence = unowned
-		out = append(out, f)
-	}
-	if len(malicious)+len(tempExec) == 0 {
-		out = append(out, finding("persistence.systemd_clean", cat, model.OK, fmt.Sprintf("Scanned %d systemd units, no malicious signs", scanned)))
-	}
-	return out
+	users, _ := c.Users()
+	_, ownersErr := c.Owners()
+	s := newSystemdScan(c.Ctx, c.Owned, users, c.Homes())
+	s.ownersErr = ownersErr
+	return s.run()
 }

