@@ -299,8 +299,16 @@ func Compare(a, b string) int {
 		ai, aErr := strconv.Atoi(af[i])
 		bi, bErr := strconv.Atoi(bf[i])
 		switch {
-		case aErr == nil && bErr == nil:
+		case aErr == nil && bErr == nil && ai != bi:
 			if ai < bi {
+				return -1
+			}
+			return 1
+		case aErr == nil && bErr == nil:
+			// Equal numbers written differently, such as "1" and "01", which
+			// semver does not allow. Ordering them by text keeps the result
+			// independent of argument order.
+			if af[i] < bf[i] {
 				return -1
 			}
 			return 1
