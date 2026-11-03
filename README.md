@@ -5,6 +5,7 @@
 [![license](https://img.shields.io/github/license/guanting112/ubuntu-sys-audit)](LICENSE)
 [![Go version](https://img.shields.io/github/go-mod/go-version/guanting112/ubuntu-sys-audit)](go.mod)
 [![build provenance: attested](https://img.shields.io/badge/provenance-attested-brightgreen?logo=github)](https://github.com/guanting112/ubuntu-sys-audit/attestations)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/guanting112/ubuntu-sys-audit/badge)](https://scorecard.dev/viewer/?uri=github.com/guanting112/ubuntu-sys-audit)
 [![Ubuntu 18.04 to 26.04](https://img.shields.io/badge/Ubuntu-18.04%20%7C%2020.04%20%7C%2022.04%20%7C%2024.04%20%7C%2026.04-E95420?logo=ubuntu&logoColor=white)](#quick-start)
 [![Linux amd64 and arm64](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-blue?logo=linux&logoColor=white)](#quick-start)
 
