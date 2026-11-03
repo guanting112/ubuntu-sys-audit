@@ -25,6 +25,11 @@ func Compare(a, b string) int {
 }
 
 func split(v string) (epoch int64, upstream, revision string) {
+	// dpkg keeps versions as C strings, which end at a NUL byte. Past one,
+	// compareFragment could not tell the byte from the end of the string.
+	if i := strings.IndexByte(v, 0); i >= 0 {
+		v = v[:i]
+	}
 	v = strings.TrimSpace(v)
 	if i := strings.IndexByte(v, ':'); i >= 0 {
 		if n, err := strconv.ParseInt(v[:i], 10, 64); err == nil {
