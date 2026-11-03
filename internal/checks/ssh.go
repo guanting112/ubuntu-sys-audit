@@ -250,6 +250,7 @@ func parseAuthorizedKey(line string) (options, keyType, blob, comment string, ok
 	}
 	inQuote := false
 	var fields []string
+	var ends []int
 	start := 0
 	for i, r := range line {
 		switch {
@@ -258,16 +259,23 @@ func parseAuthorizedKey(line string) (options, keyType, blob, comment string, ok
 		case (r == ' ' || r == '\t') && !inQuote:
 			if i > start {
 				fields = append(fields, line[start:i])
+				ends = append(ends, i)
 			}
 			start = i + 1
 		}
 	}
 	if start < len(line) {
 		fields = append(fields, line[start:])
+		ends = append(ends, len(line))
 	}
 	for i, tok := range fields {
-		if isKeyType(tok) && i+1 < len(fields) {
-			return strings.Join(fields[:i], " "), tok, fields[i+1], strings.Join(fields[i+2:], " "), true
+		if !isKeyType(tok) || strings.ContainsAny(tok, " \t") {
+			continue
+		}
+		// Quotes only group options. sshd splits the key and comment on
+		// whitespace alone, so a quote there cannot pull spaces into the key.
+		if rest := strings.Fields(line[ends[i]:]); len(rest) > 0 {
+			return strings.Join(fields[:i], " "), tok, rest[0], strings.Join(rest[1:], " "), true
 		}
 	}
 	return
