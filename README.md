@@ -74,7 +74,7 @@ gh attestation verify ubuntu-sys-audit-linux-amd64 -R guanting112/ubuntu-sys-aud
 gh attestation verify ubuntu-sys-audit-linux-arm64 -R guanting112/ubuntu-sys-audit   # arm64
 ```
 
-From v0.1.17, each release also carries the same attestation as `ubuntu-sys-audit.sigstore.json`, one file for both binaries. With it, `gh` does not need a GitHub login, so you can verify on the host itself:
+Releases from v0.1.4 on also carry the same attestation as `ubuntu-sys-audit.sigstore.json`, one file for both binaries. With it, `gh` does not need a GitHub login, so you can verify on the host itself:
 
 ```sh
 curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/ubuntu-sys-audit.sigstore.json

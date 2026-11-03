@@ -74,7 +74,7 @@ gh attestation verify ubuntu-sys-audit-linux-amd64 -R guanting112/ubuntu-sys-aud
 gh attestation verify ubuntu-sys-audit-linux-arm64 -R guanting112/ubuntu-sys-audit   # arm64
 ```
 
-從 v0.1.17 起，每個 Release 也會附上同一份 attestation：`ubuntu-sys-audit.sigstore.json`，兩種架構共用一個檔案。有了它，`gh` 不必登入 GitHub，可以直接在主機上驗證：
+從 v0.1.4 起，每個 Release 也附有同一份 attestation：`ubuntu-sys-audit.sigstore.json`，兩種架構共用一個檔案。有了它，`gh` 不必登入 GitHub，可以直接在主機上驗證：
 
 ```sh
 curl -fsSLO https://github.com/guanting112/ubuntu-sys-audit/releases/latest/download/ubuntu-sys-audit.sigstore.json
