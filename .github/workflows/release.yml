@@ -66,8 +66,15 @@ jobs:
       # SHA256SUMS sits next to the binaries, so it only catches corruption. This
       # proves a build came from this workflow: gh attestation verify <file> -R <repo>
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        id: attest
         with:
           subject-path: dist/ubuntu-sys-audit-linux-*
+      # The same attestation as a release asset, so it can be verified with
+      # gh attestation verify --bundle, and Scorecard sees a signed release.
+      - name: Attach the attestation bundle
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "$BUNDLE" dist/ubuntu-sys-audit.sigstore.json
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
