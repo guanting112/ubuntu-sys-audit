@@ -285,6 +285,10 @@ make e2e     # 每個 Ubuntu 版本都開容器、植入假後門並驗證偵測
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
+## 回報資安漏洞
+
+這個工具本身的漏洞請私下回報，不要開公開的 issue，詳見 [SECURITY.md](SECURITY.md)。
+
 ## 授權
 
 [MIT](LICENSE)

@@ -285,6 +285,10 @@ Push a tag starting with `v`, and GitHub Actions builds both architectures and c
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
+## Reporting a vulnerability
+
+Report vulnerabilities in the tool privately, not in a public issue. See [SECURITY.md](SECURITY.md).
+
 ## License
 
 [MIT](LICENSE)
