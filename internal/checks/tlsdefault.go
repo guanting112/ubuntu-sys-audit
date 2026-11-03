@@ -169,6 +169,9 @@ func probeTLS(ctx context.Context, addr netip.AddrPort) (tlsAnswer, *x509.Certif
 	client := tls.Client(counted, &tls.Config{
 		// No ServerName, so no SNI is sent: the point is to see what a
 		// scanner that knows only the address gets.
+		// CodeQL flags these two lines. Both are deliberate: a scanner takes
+		// whatever certificate it is given, and a server that offers only TLS
+		// 1.0 or 1.1 still hands its certificate out.
 		InsecureSkipVerify: true,
 		MinVersion:         tls.VersionTLS10,
 		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
