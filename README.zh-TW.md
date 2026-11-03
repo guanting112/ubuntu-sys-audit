@@ -6,6 +6,7 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/guanting112/ubuntu-sys-audit)](go.mod)
 [![build provenance: attested](https://img.shields.io/badge/provenance-attested-brightgreen?logo=github)](https://github.com/guanting112/ubuntu-sys-audit/attestations)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/guanting112/ubuntu-sys-audit/badge)](https://scorecard.dev/viewer/?uri=github.com/guanting112/ubuntu-sys-audit)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16304/badge)](https://www.bestpractices.dev/projects/16304)
 [![Ubuntu 18.04 to 26.04](https://img.shields.io/badge/Ubuntu-18.04%20%7C%2020.04%20%7C%2022.04%20%7C%2024.04%20%7C%2026.04-E95420?logo=ubuntu&logoColor=white)](#快速開始)
 [![Linux amd64 and arm64](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-blue?logo=linux&logoColor=white)](#快速開始)
 
@@ -274,9 +275,12 @@ sudo ./ubuntu-sys-audit-linux-amd64 --offline --oval-file com.ubuntu.jammy.cve.o
 
 ## 開發
 
+提出修改前請先看 [CONTRIBUTING.md](CONTRIBUTING.md)。每個版本的變更列在 [CHANGELOG.md](CHANGELOG.md)。
+
 ```sh
 make build   # 編譯到 dist/，並產生 SHA256SUMS
 make test    # 單元測試（需要 Docker）
+make fuzz    # 同時 fuzz 所有解析主機內容的函式，每個 60 秒（FUZZTIME=5m 可加長）
 make e2e     # 每個 Ubuntu 版本都開容器、植入假後門並驗證偵測結果
 ```
 
@@ -286,7 +290,7 @@ make e2e     # 每個 Ubuntu 版本都開容器、植入假後門並驗證偵測
 
 ## 發布
 
-推送 `v` 開頭的 tag，GitHub Actions 就會編譯兩種架構並建立 Release：
+先把 CHANGELOG.md 裡 `Unreleased` 底下的項目移到新版本的標題下，例如 `## [0.1.18] - 2026-11-05`，然後 commit。接著推送 `v` 開頭的 tag，GitHub Actions 就會編譯兩種架構並建立 Release，以那一段作為發佈說明。CHANGELOG 沒有這個版本的話，流程會在編譯前就失敗：
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0

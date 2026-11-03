@@ -6,6 +6,7 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/guanting112/ubuntu-sys-audit)](go.mod)
 [![build provenance: attested](https://img.shields.io/badge/provenance-attested-brightgreen?logo=github)](https://github.com/guanting112/ubuntu-sys-audit/attestations)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/guanting112/ubuntu-sys-audit/badge)](https://scorecard.dev/viewer/?uri=github.com/guanting112/ubuntu-sys-audit)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16304/badge)](https://www.bestpractices.dev/projects/16304)
 [![Ubuntu 18.04 to 26.04](https://img.shields.io/badge/Ubuntu-18.04%20%7C%2020.04%20%7C%2022.04%20%7C%2024.04%20%7C%2026.04-E95420?logo=ubuntu&logoColor=white)](#quick-start)
 [![Linux amd64 and arm64](https://img.shields.io/badge/Linux-amd64%20%7C%20arm64-blue?logo=linux&logoColor=white)](#quick-start)
 
@@ -274,9 +275,12 @@ No. A rootkit that controls the kernel can falsify anything a local tool sees, a
 
 ## Development
 
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. [CHANGELOG.md](CHANGELOG.md) lists what changed in each release.
+
 ```sh
 make build   # Build into dist/ and generate SHA256SUMS
 make test    # Unit tests (requires Docker)
+make fuzz    # Fuzz the parsers of host content, all at once, 60s each (FUZZTIME=5m for longer)
 make e2e     # Boot a container per Ubuntu release, plant fake backdoors and verify detection
 ```
 
@@ -286,7 +290,7 @@ The code only compiles for Linux. When developing on macOS, set `GOOS` to `linux
 
 ## Releasing
 
-Push a tag starting with `v`, and GitHub Actions builds both architectures and creates a release:
+Move the entries under `Unreleased` in CHANGELOG.md to a heading for the new version, such as `## [0.1.18] - 2026-11-05`, and commit. Then push a tag starting with `v`. GitHub Actions builds both architectures and creates a release with that section as its notes. Without a section for the version, the release fails before anything is built:
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
