@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"ubuntu-sys-audit/internal/fsx"
 	"ubuntu-sys-audit/internal/model"
@@ -154,8 +156,17 @@ func unitEscape(s string) (string, int) {
 		if err != nil {
 			return "", 0, false
 		}
+		// systemd rejects an escape that is not a Unicode code point, such as
+		// \UFFFFFFFF, or does not fit a byte, such as \777. Decoding them
+		// would overflow the conversions below.
 		if digits > 3 {
+			if v > unicode.MaxRune || !utf8.ValidRune(rune(v)) {
+				return "", 0, false
+			}
 			return string(rune(v)), start + digits, true
+		}
+		if v > 0xFF {
+			return "", 0, false
 		}
 		return string([]byte{byte(v)}), start + digits, true
 	}
