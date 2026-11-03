@@ -13,6 +13,12 @@ updates:
     groups:
       go-modules:
         patterns: ["*"]
+    ignore:
+      # A nested module of golang.org/x/crypto that has only pseudo-versions.
+      # Dependabot takes it for x/crypto, asks for x/crypto's latest tag and
+      # fails every run, so update it by hand:
+      #   go get golang.org/x/crypto/x509roots/fallback@latest
+      - dependency-name: golang.org/x/crypto/x509roots/fallback
 
   - package-ecosystem: github-actions
     directory: /
