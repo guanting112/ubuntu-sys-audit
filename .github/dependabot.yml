@@ -1,0 +1,25 @@
+# Dependabot opens pull requests for new Go modules and for new versions of
+# the actions in .github/workflows, updating their SHA pins and comments.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    # A new version is proposed only after it has been out for a week, so one
+    # that is pulled for being malicious or broken does not reach the binary.
+    cooldown:
+      default-days: 7
+    groups:
+      go-modules:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
