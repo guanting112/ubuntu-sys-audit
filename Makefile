@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test e2e clean
+.PHONY: build test fuzz e2e clean
 
 # Static Linux binaries. CGO is off, so they do not depend on the host's glibc
 # and the same file runs on every supported Ubuntu release.
@@ -15,6 +15,11 @@ build:
 # root user to match CI, where root only code paths are not exercised.
 test:
 	docker run --rm --user 1000:1000 -e HOME=/tmp -v "$(CURDIR)":/src -w /src golang:1.27 go test -buildvcs=false ./...
+
+# Fuzzes every target at once for FUZZTIME each, in the same image as test.
+FUZZTIME ?= 60s
+fuzz:
+	docker run --rm --user 1000:1000 -e HOME=/tmp -v "$(CURDIR)":/src -w /src golang:1.27 sh test/fuzz.sh $(FUZZTIME)
 
 # Boots each Ubuntu release in Docker, plants fake indicators and checks the
 # detections. Takes several minutes.
