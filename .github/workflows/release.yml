@@ -15,13 +15,19 @@ jobs:
     steps:
       # Actions are pinned to commit SHAs: this workflow produces a binary that
       # people run as root, so a moved tag must not be able to change the build.
+      # This job needs no git credentials, so none are left in .git/config.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # Not go-version-file: that builds with the minimum in go.mod, so releases
       # would ship without the standard library's security fixes.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
           check-latest: true
+          # No cache, as in the release job, so a tag's tests start from a clean
+          # module and build cache instead of one an earlier run left behind.
+          cache: false
       - run: go vet ./...
       - run: go test ./...
       - name: Fail on known vulnerabilities in reachable code
@@ -36,7 +42,10 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      # gh release create below authenticates with GH_TOKEN, not git.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
