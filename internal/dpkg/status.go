@@ -109,9 +109,11 @@ func NormalizePath(p string) string {
 	return p
 }
 
-// Owners answers whether a path belongs to an installed package.
+// Owners answers whether a path belongs to an installed package, and which.
 type Owners struct {
-	paths map[string]struct{}
+	// paths maps each owned path to its package, without the :arch suffix.
+	// Diverted paths map to "", as dpkg-divert records no owner for them.
+	paths map[string]string
 	// Diverted holds paths moved aside by dpkg-divert: their content is not
 	// the one recorded in the original package's md5sums.
 	Diverted map[string]struct{}
@@ -126,7 +128,7 @@ var skipOwnerPrefixes = []string{
 // LoadOwners reads every package's file list. Documentation paths are dropped
 // to keep memory proportional to what the checks ask about.
 func LoadOwners(ctx context.Context) (*Owners, error) {
-	o := &Owners{paths: make(map[string]struct{}, 1<<16), Diverted: map[string]struct{}{}}
+	o := &Owners{paths: make(map[string]string, 1<<16), Diverted: map[string]struct{}{}}
 	lists, err := filepath.Glob(InfoDir + "/*.list")
 	if err != nil {
 		return nil, err
@@ -142,6 +144,7 @@ func LoadOwners(ctx context.Context) (*Owners, error) {
 		if err != nil {
 			continue
 		}
+		pkg, _, _ := strings.Cut(strings.TrimSuffix(filepath.Base(path), ".list"), ":")
 		sc := bufio.NewScanner(f)
 		sc.Buffer(make([]byte, 64*1024), 1<<20)
 	lines:
@@ -152,7 +155,9 @@ func LoadOwners(ctx context.Context) (*Owners, error) {
 					continue lines
 				}
 			}
-			o.paths[NormalizePath(line)] = struct{}{}
+			if _, seen := o.paths[NormalizePath(line)]; !seen {
+				o.paths[NormalizePath(line)] = pkg
+			}
 		}
 		f.Close()
 	}
@@ -163,8 +168,11 @@ func LoadOwners(ctx context.Context) (*Owners, error) {
 			// holds a replacement that was installed on purpose (Docker base
 			// images divert man and initctl this way).
 			o.Diverted[NormalizePath(lines[i])] = struct{}{}
-			o.paths[NormalizePath(lines[i])] = struct{}{}
-			o.paths[NormalizePath(lines[i+1])] = struct{}{}
+			for _, p := range lines[i : i+2] {
+				if _, seen := o.paths[NormalizePath(p)]; !seen {
+					o.paths[NormalizePath(p)] = ""
+				}
+			}
 		}
 	}
 	return o, nil
@@ -177,6 +185,15 @@ func (o *Owners) Owned(path string) bool {
 	}
 	_, ok := o.paths[NormalizePath(path)]
 	return ok
+}
+
+// Package returns the package that owns path, or "" when none does or the
+// path was diverted.
+func (o *Owners) Package(path string) string {
+	if o == nil {
+		return ""
+	}
+	return o.paths[NormalizePath(path)]
 }
 
 // Mismatch is a package file that is no longer what the package installed.
