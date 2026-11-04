@@ -12,6 +12,7 @@ Notable changes in each release. The release workflow publishes a version's sect
 
 ### Added
 
+- A Stack tab listing the databases (PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite), language runtimes (Node.js, Python, Ruby, Java, PHP, Go) and servers (nginx, Apache, HAProxy, Docker, containerd) on the host. It finds them in packages, version managers such as nvm, pyenv and SDKMAN!, hand-unpacked installs, Docker containers and running processes, and says whether each listens beyond loopback. A release past its end of life is Medium, or High when it listens beyond loopback. Ubuntu's own packages are not judged by upstream dates. JSON reports carry the list as `stack`.
 - Fuzz tests for the parsers of host content and for both version orders, run with `make fuzz`. The Debian order is also checked against dpkg itself.
 
 ## [0.1.17] - 2026-11-04

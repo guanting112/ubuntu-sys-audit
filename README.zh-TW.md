@@ -165,6 +165,7 @@ sudo ./ubuntu-sys-audit-linux-amd64 --cve CVE-2026-98432,CVE-2024-6387
 | SSH | `sshd_config` 有效設定、授權金鑰清單與指紋、系統帳號的金鑰、host key 權限 |
 | 檔案 | SUID／SGID、Capabilities、暫存目錄的執行檔、`/dev` 內的一般檔案、任何人可寫的系統檔、非套件管理的系統執行檔 |
 | 套件 | 待安裝的安全更新、apt 清單是否過舊、自動更新、apt hold、第三方來源、重要軟體版本 |
+| 技術堆疊 | 資料庫（PostgreSQL、MySQL、MariaDB、Redis、Valkey、MongoDB、SQLite）、語言執行環境（Node.js、Python、Ruby、Java、PHP、Go）與伺服器（nginx、Apache、HAProxy、Docker、containerd），來源包括套件、nvm 和 pyenv 等版本管理工具、手動解壓的安裝、容器與執行中的行程；列出版本、是否監聽 loopback 以外的位址，以及所屬版本是否已經 EOL。Ubuntu 官方套件不以上游日期判斷，因為 Ubuntu 會把安全修補 backport 進自己的套件，這部分由 CVE 檢查涵蓋 |
 | 系統 | 版本支援期限與 ESM、kernel 版本、是否需要重開機、kernel 安全參數、非特權 user namespace、CPU 漏洞緩解 |
 
 ## 和其他工具的差異
@@ -186,7 +187,7 @@ sudo ./ubuntu-sys-audit-linux-amd64 --cve CVE-2026-98432,CVE-2024-6387
 
 為了看到 Censys 這類掃描器拿到的憑證，工具會對本機的 HTTPS port 做一次不帶網域名稱（SNI）的 TLS 握手。握手後不送任何請求，所以 TLS port 不會留下紀錄。80、8080 這類通常是明文 HTTP 的 port 不會連；web server 若在其他 port 跑明文 HTTP，可能會記下一筆錯誤請求。
 
-**對外連線只下載公開資料。** 連線對象是 `security-metadata.canonical.com`、`nginx.org`、`www.php.net`、`vuln.go.dev`、`api.github.com` 和 `api.snapcraft.io`，都是單純的 GET，不會傳送主機資訊。其中 nginx.org、php.net 和 vuln.go.dev 只有在發現非 Ubuntu 套件的 nginx、PHP 或 Caddy 時才會連線，後兩個則只有在發現 LXD 時才會連線。
+**對外連線只下載公開資料。** 連線對象是 `security-metadata.canonical.com`、`nginx.org`、`www.php.net`、`vuln.go.dev`、`api.github.com` 和 `api.snapcraft.io`，都是單純的 GET，不會傳送主機資訊。其中 nginx.org、php.net 和 vuln.go.dev 只有在發現非 Ubuntu 套件的 nginx、PHP 或 Caddy 時才會連線，後兩個則只有在發現 LXD 時才會連線。EOL 日期來自 endoflife.date，但已經內建在執行檔裡，掃描時不會連線過去。
 
 **CVE 不只比版本號。** Ubuntu 會把修補 backport 到舊版本，`nginx 1.18.0` 可能早已修補，所以 apt 套件一律比對 Canonical 的 OVAL 資料。自行編譯、官方套件庫或 PPA 的版本才比對上游公告。
 
@@ -290,7 +291,7 @@ make e2e     # 每個 Ubuntu 版本都開容器、植入假後門並驗證偵測
 
 ## 發布
 
-先把 CHANGELOG.md 裡 `Unreleased` 底下的項目移到新版本的標題下，例如 `## [0.1.18] - 2026-11-05`，然後 commit。接著推送 `v` 開頭的 tag，GitHub Actions 就會編譯兩種架構並建立 Release，以那一段作為發佈說明。CHANGELOG 沒有這個版本的話，流程會在編譯前就失敗：
+先用 `go run ./internal/eol/gen` 更新內建的 EOL 日期，再把 CHANGELOG.md 裡 `Unreleased` 底下的項目移到新版本的標題下，例如 `## [0.1.18] - 2026-11-05`，然後一起 commit。接著推送 `v` 開頭的 tag，GitHub Actions 就會編譯兩種架構並建立 Release，以那一段作為發佈說明。CHANGELOG 沒有這個版本的話，流程會在編譯前就失敗：
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0

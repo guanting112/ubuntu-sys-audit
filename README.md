@@ -165,6 +165,7 @@ The opening screen disappears on its own after a moment, or on any key. The scan
 | SSH | Effective `sshd_config` settings, authorized keys with fingerprints, keys on system accounts, host key permissions |
 | Filesystem | SUID and SGID files, capabilities, executables in temporary directories, regular files in `/dev`, world-writable system files, system binaries not managed by a package |
 | Packages | Pending security updates, stale apt lists, automatic updates, apt holds, third-party sources, versions of key software |
+| Stack | Databases (PostgreSQL, MySQL, MariaDB, Redis, Valkey, MongoDB, SQLite), language runtimes (Node.js, Python, Ruby, Java, PHP, Go) and servers (nginx, Apache, HAProxy, Docker, containerd), from packages, version managers such as nvm and pyenv, hand-unpacked installs, containers and running processes; their versions, whether they listen beyond loopback, and whether their release is past its end of life. Ubuntu's own packages are not judged by upstream dates, because Ubuntu backports security fixes into them, which the CVE check covers |
 | System | Release support dates and ESM, kernel version, pending reboots, kernel security parameters, unprivileged user namespaces, CPU vulnerability mitigations |
 
 ## How it compares
@@ -186,7 +187,7 @@ Known exception: when the tool reads BPF filters, the kernel may automatically l
 
 To see the certificate a scanner such as Censys gets, the tool makes a TLS handshake to the host's own HTTPS ports without a server name. It sends no request, so a TLS port logs nothing for it. Ports that usually carry plain HTTP, such as 80 and 8080, are left out; a plain HTTP site on another port of a web server may log one bad request.
 
-**Outbound traffic only downloads public data.** The tool connects to `security-metadata.canonical.com`, `nginx.org`, `www.php.net`, `vuln.go.dev`, `api.github.com` and `api.snapcraft.io` using plain GET requests that send no information about the host. It contacts nginx.org, php.net and vuln.go.dev only when it finds non-Ubuntu builds of nginx, PHP or Caddy, and the last two only when it finds LXD.
+**Outbound traffic only downloads public data.** The tool connects to `security-metadata.canonical.com`, `nginx.org`, `www.php.net`, `vuln.go.dev`, `api.github.com` and `api.snapcraft.io` using plain GET requests that send no information about the host. It contacts nginx.org, php.net and vuln.go.dev only when it finds non-Ubuntu builds of nginx, PHP or Caddy, and the last two only when it finds LXD. End of life dates come from endoflife.date but are built into the binary, so the scan never contacts it.
 
 **CVE checks do not rely on version numbers alone.** Ubuntu backports fixes to older versions, so `nginx 1.18.0` may already be patched. Apt packages are always compared against Canonical's OVAL data. Only self-compiled, upstream repository and PPA builds are compared against upstream advisories.
 
@@ -290,7 +291,7 @@ The code only compiles for Linux. When developing on macOS, set `GOOS` to `linux
 
 ## Releasing
 
-Move the entries under `Unreleased` in CHANGELOG.md to a heading for the new version, such as `## [0.1.18] - 2026-11-05`, and commit. Then push a tag starting with `v`. GitHub Actions builds both architectures and creates a release with that section as its notes. Without a section for the version, the release fails before anything is built:
+Refresh the built-in end of life dates with `go run ./internal/eol/gen`. Move the entries under `Unreleased` in CHANGELOG.md to a heading for the new version, such as `## [0.1.18] - 2026-11-05`, and commit both. Then push a tag starting with `v`. GitHub Actions builds both architectures and creates a release with that section as its notes. Without a section for the version, the release fails before anything is built:
 
 ```sh
 git tag v0.1.0 && git push origin v0.1.0
