@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -123,6 +124,37 @@ func FuzzParseNginx(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, src string) {
 		parseNginxTokens(src)
+	})
+}
+
+// FuzzStackVersion feeds the version, image and container parsers what a
+// container's metadata or a package database may hold. Every version that
+// comes back must be plain dotted numbers, which the end of life lookup and
+// fleet queries rely on.
+func FuzzStackVersion(f *testing.F) {
+	for _, s := range []string{
+		"1:10.11.6+maria~ubu2204", "jdk8u392-b08", "1.8.0_392", "v20.11.1", "go1.22.0",
+		"localhost:5000/team/redis:7.2.4-alpine@sha256:00", "library/postgres:11", ":", "@", "9:",
+	} {
+		f.Add(s, "PG_VERSION="+s)
+	}
+	valid := regexp.MustCompile(`^\d+(\.\d+){0,3}$`)
+	f.Fuzz(func(t *testing.T, s, env string) {
+		if v := stackVersion(s); v != "" && !valid.MatchString(v) {
+			t.Fatalf("stackVersion(%q) = %q", s, v)
+		}
+		repo, _ := imageRef(s)
+		if strings.Contains(repo, "@") {
+			t.Fatalf("imageRef(%q) kept a digest in %q", s, repo)
+		}
+		for id, v := range containerProducts(s, strings.Split(env, "\n")) {
+			if stackByID[id] == nil {
+				t.Fatalf("containerProducts(%q) named unknown product %q", s, id)
+			}
+			if v != "" && !valid.MatchString(v) {
+				t.Fatalf("containerProducts(%q) gave version %q", s, v)
+			}
+		}
 	})
 }
 

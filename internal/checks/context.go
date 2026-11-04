@@ -66,6 +66,7 @@ type shared struct {
 
 	mu        sync.Mutex
 	inventory []model.InventoryItem
+	stack     []model.StackItem
 
 	procsOnce sync.Once
 	procs     []*procinfo.Process
@@ -381,6 +382,13 @@ func (c *Context) AddInventory(items ...model.InventoryItem) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.inventory = append(c.inventory, items...)
+}
+
+// AddStack records the databases, runtimes and servers for the report.
+func (c *Context) AddStack(items ...model.StackItem) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stack = append(c.stack, items...)
 }
 
 // isLoginShell reports whether an account can get an interactive shell. An

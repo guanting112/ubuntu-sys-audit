@@ -52,12 +52,13 @@ const (
 	CatPackages    Category = "packages"
 	CatCVE         Category = "cve"
 	CatWeb         Category = "web"
+	CatStack       Category = "stack"
 )
 
 // Categories lists categories in display order.
 var Categories = []Category{
 	CatCVE, CatWeb, CatNetwork, CatProcess, CatIntegrity, CatPersistence,
-	CatAccounts, CatSSH, CatFilesystem, CatPackages, CatSystem,
+	CatAccounts, CatSSH, CatFilesystem, CatPackages, CatStack, CatSystem,
 }
 
 var categoryLabels = map[Category]string{
@@ -72,6 +73,7 @@ var categoryLabels = map[Category]string{
 	CatPackages:    "Packages",
 	CatCVE:         "CVE",
 	CatWeb:         "Web",
+	CatStack:       "Stack",
 }
 
 // Label returns the display name.
@@ -128,6 +130,30 @@ type InventoryItem struct {
 	Source  string `json:"source"`
 }
 
+// StackItem is one database, language runtime or server found on the host,
+// with the end of life of its release where that can be judged.
+type StackItem struct {
+	// Product is the endoflife.date ID, such as "postgresql".
+	Product string `json:"product"`
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	Cycle   string `json:"cycle,omitempty"`
+	// Source is ubuntu, upstream-repo, third-party, unpackaged,
+	// version-manager or container.
+	Source    string   `json:"source"`
+	Package   string   `json:"package,omitempty"`
+	Path      string   `json:"path,omitempty"`
+	Container string   `json:"container,omitempty"`
+	Image     string   `json:"image,omitempty"`
+	Running   bool     `json:"running"`
+	Exposed   bool     `json:"exposed"`
+	Listen    []string `json:"listen,omitempty"`
+	EOL       string   `json:"eol,omitempty"`
+	// Status is supported, eol-soon, eol, ubuntu (follows the Ubuntu
+	// release's support) or unknown.
+	Status string `json:"status"`
+}
+
 // Summary counts findings per severity.
 type Summary struct {
 	Critical int `json:"critical"`
@@ -167,6 +193,7 @@ type Report struct {
 	Incomplete bool            `json:"incomplete"`
 	Findings   []Finding       `json:"findings"`
 	Inventory  []InventoryItem `json:"inventory,omitempty"`
+	Stack      []StackItem     `json:"stack,omitempty"`
 	Checks     []CheckResult   `json:"checks"`
 }
 

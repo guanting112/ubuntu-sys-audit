@@ -538,7 +538,8 @@ func checkFirewall(c *Context) []model.Finding {
 type dockerConfig struct {
 	Name   string `json:"Name"`
 	Config struct {
-		Image string `json:"Image"`
+		Image string   `json:"Image"`
+		Env   []string `json:"Env"`
 	} `json:"Config"`
 	State struct {
 		Running bool `json:"Running"`

@@ -67,6 +67,7 @@ func All() []Check {
 		{"packages.updates", "Security and automatic updates", model.CatPackages, time.Minute, checkUpdates},
 		{"packages.sources", "Third-party package sources", model.CatPackages, quick, checkAptSources},
 		{"packages.inventory", "Key software versions", model.CatPackages, quick, checkInventory},
+		{"stack.inventory", "Tech stack and end of life", model.CatStack, 2 * time.Minute, checkStack},
 		{"web.shell", "Webshell scan", model.CatWeb, 4 * time.Minute, checkWebshells},
 		{"web.nginx", "nginx version and configuration", model.CatWeb, 2 * time.Minute, checkNginx},
 		{"web.php", "PHP version and configuration", model.CatWeb, 2 * time.Minute, checkPHP},
@@ -137,10 +138,22 @@ func Run(ctx context.Context, opts Options, onEvent func(Event)) *model.Report {
 	}
 	c.mu.Lock()
 	report.Inventory = append(report.Inventory, c.inventory...)
+	report.Stack = append(report.Stack, c.stack...)
 	c.mu.Unlock()
 	for i := range report.Inventory {
 		report.Inventory[i].Name = model.Clean(report.Inventory[i].Name)
 		report.Inventory[i].Version = model.Clean(report.Inventory[i].Version)
+	}
+	// Paths, image names and versions come from the host, so they get the
+	// same treatment as finding text.
+	for i := range report.Stack {
+		s := &report.Stack[i]
+		for _, f := range []*string{&s.Name, &s.Version, &s.Cycle, &s.Package, &s.Path, &s.Container, &s.Image, &s.EOL} {
+			*f = model.Clean(*f)
+		}
+		for j := range s.Listen {
+			s.Listen[j] = model.Clean(s.Listen[j])
+		}
 	}
 	report.DurationMS = time.Since(start).Milliseconds()
 	report.Finalize()
