@@ -4,6 +4,8 @@ Notable changes in each release. The release workflow publishes a version's sect
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-11-05
+
 ### Fixed
 
 - Debian version comparison now stops at a NUL byte, as dpkg does. Before, such a version could break the ordering. Found by fuzzing.
@@ -157,7 +159,8 @@ Notable changes in each release. The release workflow publishes a version's sect
 
 - First release: a read-only security audit for Ubuntu 18.04 to 26.04 as one static binary, with a terminal UI and text and JSON output for runs over SSH. It checks missing CVE fixes against Canonical's USN data, port 53 listeners, BPFDoor-style packet filters, webshells, tampered binaries, persistence, accounts, SSH and filesystem issues, and never runs a program from the host.
 
-[Unreleased]: https://github.com/guanting112/ubuntu-sys-audit/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/guanting112/ubuntu-sys-audit/compare/v0.1.18...HEAD
+[0.1.18]: https://github.com/guanting112/ubuntu-sys-audit/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/guanting112/ubuntu-sys-audit/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/guanting112/ubuntu-sys-audit/compare/v0.1.15...v0.1.16
 [0.1.15]: https://github.com/guanting112/ubuntu-sys-audit/compare/v0.1.14...v0.1.15
