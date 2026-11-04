@@ -24,8 +24,11 @@ It helps answer questions like these, on one server or across a fleet:
 - Does this host show signs of a backdoor, such as BPFDoor, a webshell, a reverse shell or a crypto miner?
 - Who has root, sudo or SSH key access, and what is set to run at startup?
 - Which hosts have pending security updates, need a reboot or run a release past its support date?
+- Which databases, language runtimes and servers does each host run, and which are past their end of life?
 
 ![Terminal UI listing an Ubuntu host's security findings by severity](docs/tui-results.png)
+
+![Terminal UI showing the tech stack of an Ubuntu host: MariaDB, nginx, Node.js, Python, Ruby, SQLite and Valkey, with where each came from, what it listens on and how long it is supported](docs/tui-stack.png)
 
 ## Highlights
 

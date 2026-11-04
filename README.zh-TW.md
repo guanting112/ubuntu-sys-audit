@@ -24,8 +24,11 @@
 - 這台主機有沒有後門跡象，例如 BPFDoor、webshell、reverse shell 或挖礦程式？
 - 誰有 root、sudo 或 SSH 金鑰權限？開機時會自動執行哪些東西？
 - 哪些主機有待安裝的安全更新、需要重開機，或版本已超過支援期限？
+- 每台主機跑了哪些資料庫、語言執行環境和伺服器？哪些已經 EOL？
 
 ![終端機介面依嚴重度列出 Ubuntu 主機的安全檢測結果](docs/tui-results.png)
+
+![終端機介面顯示 Ubuntu 主機的技術堆疊：MariaDB、nginx、Node.js、Python、Ruby、SQLite 與 Valkey，以及各自的來源、監聽位址和支援期限](docs/tui-stack.png)
 
 ## 特色
 
