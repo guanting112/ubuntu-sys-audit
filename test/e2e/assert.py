@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Checks a scan report against what the end to end test expects."""
+import calendar
 import json
+import os
 import re
 import sys
+import time
 
 SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "info": 3, "ok": 4, "skipped": 5}
 
@@ -65,6 +68,7 @@ PLANTED = {
     "network.exposed.caddy": "critical",
     "web.php.upstream": "high",
     "web.tls.default_cert": "high",
+    "stack.eol": "high",
 }
 
 # Secrets planted on the host. None may appear anywhere in a report.
@@ -72,7 +76,7 @@ SECRETS = ["AAAABBBBCCCCDDDD", "hunter2", "$6$saltsalt"] + [f"S3CRET{n}" for n i
 
 # Categories where a critical or high finding on a stock host is a false alarm.
 # CVEs and support status are real on old releases.
-NO_ALARM_WHEN_CLEAN = {"accounts", "ssh", "network", "process", "integrity", "persistence", "filesystem", "web"}
+NO_ALARM_WHEN_CLEAN = {"accounts", "ssh", "network", "process", "integrity", "persistence", "filesystem", "web", "stack"}
 
 
 def load(path):
@@ -110,6 +114,7 @@ def check_clean(report):
         for f in report["findings"]
         if f["category"] in NO_ALARM_WHEN_CLEAN and SEVERITY_RANK[f["severity"]] <= SEVERITY_RANK["high"]
     ]
+    failures += check_stack_clean(report)
     return failures
 
 
@@ -228,9 +233,112 @@ def check_planted(report, raw):
     refuse("network.listener_bad_exe", "nginx", "a service awaiting restart was called malware")
     refuse("process.temp_exe", "/tmp/audit", "the tool flagged itself")
     refuse("filesystem.temp_elf", "/tmp/audit", "the tool flagged its own binary")
+    expect("stack.eol", "e2e-pg11", "an end of life PostgreSQL container published to the network was not reported")
+    expect("stack.eol", "e2e-mongo", "an end of life MongoDB container was not reported")
+    expect("stack.eol", "/root/.nvm/versions/node/v14.21.3", "Node.js 14 from nvm was not reported")
+    expect("stack.eol", "/home/bob/.pyenv/versions/3.7.17", "Python 3.7 from pyenv was not reported")
+    expect("stack.eol", "/opt/jdk-16.0.2", "a JDK unpacked by hand was not reported")
+    expect("stack.eol", "/usr/local/go", "a Go toolchain unpacked by hand was not reported")
+    refuse("stack.inventory", "2.6.10", "a version manager behind a symlink was read")
+    stack = report.get("stack") or []
+    pg = [i for i in stack if i.get("container") == "e2e-pg11"]
+    if not (pg and pg[0].get("version") == "11.22" and pg[0]["status"] == "eol" and pg[0]["exposed"]):
+        failures.append(f"the PostgreSQL 11 container is wrong in the stack list: {pg}")
+    redis = [i for i in stack if i.get("path") == "/opt/redis/bin/redis-server"]
+    if not (redis and redis[0]["source"] == "unpackaged" and redis[0]["running"] and redis[0]["exposed"] and redis[0].get("version")):
+        failures.append(f"the unpackaged Redis on every address is wrong in the stack list: {redis}")
     durations = {c["id"]: c["duration_ms"] for c in report["checks"]}
     if durations.get("web.nginx", 0) > 30000:
         failures.append(f"a FIFO stalled the nginx check for {durations['web.nginx']} ms")
+    return failures
+
+
+# Packages the e2e image installs that the stack check must list, as the
+# product each one is.
+STACK_PACKAGES = [
+    (re.compile(r"^postgresql-\d+(\.\d+)?$"), "postgresql"),
+    (re.compile(r"^redis-server$"), "redis"),
+    (re.compile(r"^valkey-server$"), "valkey"),
+    (re.compile(r"^mysql-server-core-[\d.]+$"), "mysql"),
+    (re.compile(r"^mariadb-server(-core)?(-[\d.]+)?$"), "mariadb"),
+    (re.compile(r"^libsqlite3-0$"), "sqlite"),
+    (re.compile(r"^nodejs$"), "nodejs"),
+    (re.compile(r"^python3\.\d+$"), "python"),
+]
+
+
+def installed_packages(path="/var/lib/dpkg/status"):
+    names, name = set(), None
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if line.startswith("Package: "):
+                name = line.split(":", 1)[1].strip()
+            elif line.startswith("Status: ") and line.rstrip().endswith(" installed") and name:
+                names.add(name)
+    return names
+
+
+def running_names(scanned_at):
+    """Names of processes that started before the scan and still run.
+
+    A service caught in a restart loop has processes that come and go, or
+    are exiting with no executable left, so only one that was already up
+    when the scan began and is still up now must be marked as running.
+    """
+    with open("/proc/stat", encoding="utf-8") as handle:
+        btime = int(next(line.split()[1] for line in handle if line.startswith("btime")))
+    ticks = os.sysconf("SC_CLK_TCK")
+    stamp = scanned_at.split(".")[0].rstrip("Z")
+    scan_start = calendar.timegm(time.strptime(stamp, "%Y-%m-%dT%H:%M:%S"))
+    names = set()
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as handle:
+                stat = handle.read()
+            fields = stat[stat.rindex(")") + 2:].split()
+            started = btime + int(fields[19]) / ticks
+            os.readlink(f"/proc/{pid}/exe")
+            with open(f"/proc/{pid}/comm", encoding="utf-8", errors="replace") as handle:
+                name = handle.read().strip()
+        except (OSError, ValueError, IndexError):
+            continue
+        if fields[0] != "Z" and started < scan_start:
+            names.add(name)
+    return names
+
+
+def check_stack_clean(report):
+    """Ubuntu's own packages must be listed as such and never judged by upstream dates."""
+    failures = []
+    stack = report.get("stack") or []
+    listed = {(item["product"], item["source"]) for item in stack}
+    for name in sorted(installed_packages()):
+        for pattern, product in STACK_PACKAGES:
+            if pattern.match(name) and (product, "ubuntu") not in listed:
+                failures.append(f"installed package {name} is not listed as Ubuntu's {product}")
+    for item in stack:
+        if item["source"] == "unpackaged":
+            failures.append(f"packaged software listed as unpackaged: {item['name']} at {item.get('path')}")
+        if item["source"] == "ubuntu" and (item["status"] != "ubuntu" or item.get("eol")):
+            failures.append(f"an Ubuntu package was judged by upstream dates: {item['name']} {item.get('version')}")
+    # A service that failed to start, such as Valkey losing port 6379 to
+    # Redis, is not expected to show as running.
+    running = running_names(report["scanned_at"])
+    for names, products in (
+        ({"postgres"}, {"postgresql"}),
+        ({"redis-server"}, {"redis"}),
+        ({"valkey-server"}, {"valkey"}),
+        ({"mysqld", "mariadbd"}, {"mysql", "mariadb"}),
+    ):
+        if running & names and not any(i["product"] in products and i["running"] for i in stack):
+            failures.append(f"a running {'/'.join(sorted(names))} is not marked as running")
+    failures += [
+        f"end of life reported on a clean host: {f['title']}"
+        for f in report["findings"]
+        if f["id"].startswith("stack.eol")
+    ]
     return failures
 
 

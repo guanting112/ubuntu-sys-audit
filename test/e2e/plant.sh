@@ -295,6 +295,27 @@ echo '{"NetworkMode":"bridge","PortBindings":{"5555/tcp":[{"HostIp":"","HostPort
 echo '{"Name":"/hostnet1","Config":{"Image":"x"},"State":{"Running":true}}' >/var/lib/docker/containers/hostnet1/config.v2.json
 echo '{"NetworkMode":"host","PortBindings":{"5556/tcp":[{"HostIp":"","HostPort":"5556"}]}}' >/var/lib/docker/containers/hostnet1/hostconfig.json
 
+# --- tech stack: end of life releases in containers, from version managers
+# and unpacked by hand, a Redis no package owns listening on every address,
+# and a version manager behind a symlink, which must not be read.
+mkdir -p /var/lib/docker/containers/e2e-pg11 /var/lib/docker/containers/e2e-mongo
+cat >/var/lib/docker/containers/e2e-pg11/config.v2.json <<'EOF'
+{"Name":"/e2e-pg11","Config":{"Image":"postgres:11","Env":["PG_MAJOR=11","PG_VERSION=11.22-1.pgdg120+1"]},"State":{"Running":true},
+ "NetworkSettings":{"Ports":{"5432/tcp":[{"HostIp":"0.0.0.0","HostPort":"15432"}]}}}
+EOF
+echo '{"NetworkMode":"bridge"}' >/var/lib/docker/containers/e2e-pg11/hostconfig.json
+cat >/var/lib/docker/containers/e2e-mongo/config.v2.json <<'EOF'
+{"Name":"/e2e-mongo","Config":{"Image":"mongo:4.4","Env":["MONGO_VERSION=4.4.29"]},"State":{"Running":true}}
+EOF
+echo '{"NetworkMode":"bridge"}' >/var/lib/docker/containers/e2e-mongo/hostconfig.json
+mkdir -p /root/.nvm/versions/node/v14.21.3/bin /home/bob/.pyenv/versions/3.7.17 /opt/jdk-16.0.2 /usr/local/go /root/e2e-rbenv/versions/2.6.10
+chown -R bob /home/bob/.pyenv
+printf 'JAVA_VERSION="16.0.2"\nIMPLEMENTOR="Eclipse Adoptium"\n' >/opt/jdk-16.0.2/release
+printf 'go1.19.13\ntime 2023-09-06T15:37:56Z\n' >/usr/local/go/VERSION
+ln -s /root/e2e-rbenv /home/bob/.rbenv
+mkdir -p /opt/redis/bin && cp -L /usr/bin/redis-server /opt/redis/bin/redis-server
+/opt/redis/bin/redis-server --port 6390 --bind 0.0.0.0 --daemonize yes --save '' >/dev/null 2>&1
+
 # --- rarely used protocols: the module list a real kernel would have. tipc is
 # blocked, and modprobe ignores files with no .conf suffix, so sctp is not.
 kernel_dir="/lib/modules/$(uname -r)"

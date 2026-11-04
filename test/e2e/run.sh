@@ -45,6 +45,11 @@ for release in "$@"; do
 	docker exec "$name" sh -c 'pgrep -x systemd-udevd >/dev/null || /lib/systemd/systemd-udevd --daemon >/dev/null 2>&1; sleep 1; pgrep -x systemd-udevd >/dev/null' \
 		|| { echo "  FAIL udevd is not running, so the clean scan would not test it"; status=1; }
 
+	# Databases start slowly. Scan once boot has finished, so the scan sees the
+	# services that do run. Device units stay "activating" in a container, so
+	# the system state is what is waited on.
+	docker exec "$name" sh -c 'for i in $(seq 120); do [ "$(systemctl is-system-running 2>/dev/null)" = starting ] || exit 0; sleep 1; done'
+
 	docker exec "$name" sh -c '/opt/e2e/audit --json >/root/clean.json 2>/dev/null; python3 /opt/e2e/assert.py clean /root/clean.json' || status=1
 
 	docker exec "$name" sh /opt/e2e/plant.sh >/dev/null 2>&1
